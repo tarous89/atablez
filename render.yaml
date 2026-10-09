@@ -12,6 +12,8 @@ services:
       - app.atablez.com
       - atablez.com
     envVars:
+      - key: PUBLIC_URL
+        value: https://app.atablez.com
       - key: INVITE_FROM
         value: AtableZ <invite@atablez.com>
       - key: NODE_ENV

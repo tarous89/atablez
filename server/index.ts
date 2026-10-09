@@ -28,6 +28,7 @@ export async function createApp() {
     const allowed = [
       base,
       "https://app.atablez.com",
+      "https://atablez.onrender.com",
       "https://chatgpt.com",
       "https://web-sandbox.oaiusercontent.com",
     ];

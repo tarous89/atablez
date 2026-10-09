@@ -353,3 +353,7 @@ Resend atablez.com domain created in eu-west-1; authentication pending IONOS DNS
 ### Domain DNS follow-up (2026-10-09)
 
 Owner saved IONOS DNS. Expected root/app and Resend records observed publicly; some root A caches remain stale. Resend verification triggered, pending. Custom HTTPS and canonical URL migration remain unverified; no sender secret or test email created. See context.md.
+
+### Custom domains activated (2026-10-09)
+
+Landing and app verified HTTPS 200; Resend domain authentication verified. Scoped sending key installed as Render secret, invitation sender configured, PUBLIC_URL switched to app.atablez.com. Legacy origin kept allowed for existing sessions. No real email sent. ChatGPT connection refresh remains separate.

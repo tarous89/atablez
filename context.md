@@ -81,3 +81,7 @@ Domain-preparation validation: production build/TypeScript passed. Local proxy-h
 ## DNS follow-up — 2026-10-09 13:18 UTC
 
 User confirmed saving IONOS records. Public DNS checks now return the expected app CNAME, apex A 216.24.57.1 (some resolver caches still return the former IP), no apex AAAA, and all four exact Resend records. Resend verification was triggered and remains pending. HTTPS checks for custom hosts have not succeeded yet; keep PUBLIC_URL unchanged until verified. No API key created or actual invitation sent. Domain preparation release 58fb5af011931ae5669cae6efb99ed47dc5798be deployed successfully through Blueprint sync.
+
+## Domain activation — 2026-10-09 14:46 UTC
+
+Both https://atablez.com (landing) and https://app.atablez.com (app and health endpoint) return HTTP 200 over valid HTTPS. Resend domain and all four records are verified. A sending-only key restricted to this domain was created and installed in Render RESEND_API_KEY; never copy the token into this file. INVITE_FROM is AtableZ <invite@atablez.com>. PUBLIC_URL updated to https://app.atablez.com and declared in Blueprint. Runtime configuration deployment triggered automatically. Legacy origin explicitly retained in CORS so existing browser sessions keep working. No real test email sent. Existing ChatGPT connection may need refreshing for the new canonical OAuth/MCP host; do not claim installed connection refreshed. These verified facts supersede earlier pending-status entries.
