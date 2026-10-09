@@ -154,9 +154,9 @@ Repository layout:
 
 Hosting decisions:
 - Render chosen by user, replacing the earlier Cloudflare + Supabase proposal.
-- Blueprint uses free test plans because paid instance sizes have not been selected. Free database expires after 30 days; free app sleeps. Do not promise durable public storage on this configuration.
+- User explicitly approved a NEW dedicated free web service and NEW dedicated free PostgreSQL instance on 2026-10-09; do not reuse existing services/databases. Blueprint uses the approved free test plans. Free database expires after 30 days; free app sleeps. Do not promise durable public storage on this configuration.
 - Small paid app + database starts around $13/month at reviewed pricing, before overages; sizing remains a deployment decision.
-- No resources or subscriptions have been created. Render's connected workspace must be confirmed before provisioning.
+- Destination confirmed: Tarek Roustom's Workspace (tea-cspqipl6l47c739nslfg), Frankfurt. No AtableZ resources have been created yet. Blueprint is committed on main; applying it through Render Dashboard is pending because the connected tools cannot launch Blueprints or wire database connection references.
 
 ## 6. Proposed defaults, not yet user-approved product policy
 
@@ -262,7 +262,7 @@ Known implementation limits / release gates:
 - Database startup creates initial tables; versioned production migrations must precede schema evolution.
 - Name availability for AtableZ remains unchecked.
 
-Next action: confirm the Render destination, deploy the dedicated app/database, and test the real ChatGPT guest/panel/OAuth flow before finalizing the installable plugin package.
+Next action: apply https://dashboard.render.com/blueprint/new?repo=https://github.com/tarous89/atablez in the confirmed workspace, then verify health, PostgreSQL persistence, and real ChatGPT guest/panel/OAuth flow before finalizing the installable plugin package.
 
 Later inputs needed:
 - Hosting account/project access and final domain before deployment.
