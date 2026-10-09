@@ -81,6 +81,7 @@ function App() {
   const [w, setW] = useState<Workspace | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [status, setStatus] = useState("All changes saved");
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
@@ -100,10 +101,13 @@ function App() {
       setAuth(result._meta.auth);
       apiBase = result._meta.apiBase || "";
       if (result._meta.state) setW(result._meta.state);
-      setError("");
+      setLoadError("");
       api("workspace")
-        .then(setW)
-        .catch((e) => setError(e.message));
+        .then((state) => {
+          setW(state);
+          setLoadError("");
+        })
+        .catch((e) => setLoadError(e.message));
       setSelected(result._meta.selected || null);
       setStatus("All changes saved");
     }
@@ -119,13 +123,13 @@ function App() {
     try {
       const state = await api("workspace");
       setW(state);
-      setError("");
+      setLoadError("");
     } catch (e: any) {
       if (e.status === 410) {
         setW(null);
         setError(e.message);
         setAuth("");
-      } else setError(e.message);
+      } else setLoadError(e.message);
     }
   }
   useEffect(() => {
@@ -157,6 +161,7 @@ function App() {
       )
         api("workspace")
           .then((next) => {
+            setLoadError("");
             if (
               next.revision !== ref.current?.revision ||
               next.expiresAt !== ref.current?.expiresAt
@@ -168,7 +173,7 @@ function App() {
               setError(e.message);
               setW(null);
               setAuth("");
-            }
+            } else setLoadError(e.message);
           });
     }, 5000);
     return () => clearInterval(timer);
@@ -186,6 +191,7 @@ function App() {
         requestId: uuid(),
       });
       setW(next);
+      setLoadError("");
       ref.current = next;
       setStatus("All changes saved");
       return next;
@@ -366,12 +372,15 @@ function App() {
           </button>
         </div>
       )}
-      {error && (
+      {(error || loadError) && (
         <div role="alert" className="error">
-          {error}
+          {error || (loadError === "Failed to fetch"
+            ? "Could not refresh your tables. Retrying automatically…"
+            : loadError)}
           <button
             onClick={() => {
               setError("");
+              setLoadError("");
               if (auth) refresh();
             }}
           >
