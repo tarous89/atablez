@@ -1,0 +1,26 @@
+# Private beta defaults. Free Postgres expires after 30 days; upgrade before durable use.
+services:
+  - type: web
+    name: atablez
+    runtime: node
+    region: frankfurt
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 24.19.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: atablez-db
+          property: connectionString
+databases:
+  - name: atablez-db
+    region: frankfurt
+    plan: free
+    databaseName: atablez
+    user: atablez
+    ipAllowList: []

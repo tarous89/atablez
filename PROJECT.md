@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-09
 Repository: https://github.com/tarous89/atablez
-Stage: scoped; implementation has not started.
+Stage: first private-beta implementation built locally; deployment and live ChatGPT validation pending.
 Owner: Tarek Roustom
 
 ## 1. Product and agreed direction
@@ -16,9 +16,12 @@ The first successful interaction creates a useful table with real entries from t
 Confirmed requirements:
 - Name: AtableZ. This is the chosen working name; its trademark/domain availability has not been checked. AnyTable was rejected following existing-use findings.
 - Source code and living project documentation stay in this GitHub repository.
-- Owner-controlled hosting; prioritize inexpensive infrastructure. Do not use Sites hosting for this project.
+- Owner-controlled hosting on Render, using dedicated AtableZ app and PostgreSQL services. No Cloudflare/Supabase or Sites hosting.
 - ChatGPT is the primary entry point; the website provides the same editor and access to existing work.
 - One personal workspace per user initially; no projects.
+- Top navigation only; preserve horizontal room for tables.
+- Direct click-to-edit table names, descriptions, and entry values; no edit-mode buttons.
+- Modify table opens a structure editor for column names, descriptions, data types, and filling instructions.
 - Tables are the primary interface; reusable structured notes/forms are also supported.
 - Users can create and edit structures and data through chat or directly in the app.
 - Field and collection instructions tell ChatGPT how to fill future entries.
@@ -131,39 +134,34 @@ Avoid a second chatbot inside the web app for MVP. Manual editing must work inde
 
 ## 5. Proposed technical approach
 
-Recommended default, pending the initial integration spike:
-- TypeScript monorepo.
-- Shared React UI for browser and MCP app views.
-- Cloudflare Workers for API/MCP endpoint and static app hosting.
-- Supabase PostgreSQL and Auth in an appropriate EU region.
-- Shared service layer for UI and MCP operations, validation, authorization, and change history.
-- Supported MCP SDK and MCP Apps/Extensions integration pinned after a compatibility check.
-- OAuth-compliant ChatGPT connection using a supported provider/adapter; Supabase web login alone is not an MCP authorization implementation.
-- Row-level security plus server-side ownership checks for every operation. Never expose privileged database credentials to the client.
-- Database-backed revisions; tool results update the active panel. Use authenticated realtime notifications or bounded polling for other active views, depending on integration results.
-- No separate model API is required for the MVP: ChatGPT interprets requests and fills templates; the backend stores, validates, and queries.
+Implemented architecture:
+- TypeScript, React, Express, official MCP SDK and MCP Apps SDK.
+- One dedicated Render web service serves API, MCP/OAuth, and the same bundled UI used on the web and in ChatGPT.
+- Dedicated Render PostgreSQL. Local development/tests use PGlite; production refuses to start without DATABASE_URL.
+- Workspace data uses bounded JSONB documents with transaction locks and revisions for this private beta. Maximum 2,000 entries/account. Normalize entry storage and indexed queries before raising limits.
+- Scrypt password hashing, opaque sessions stored hashed in PostgreSQL, standard SDK OAuth routes with PKCE and rotating refresh tokens. No Supabase dependency.
+- Authenticated polling refreshes the UI after chat writes; polling pauses while an input is focused.
+- Inline app resource with fullscreen preference and global/thread entrypoints. Host behavior still needs live validation.
+- No model API or API key required.
 
-Suggested layout once building starts:
-- apps/web — shared browser and embedded UI entry points
-- apps/server — HTTP API, MCP, auth integration
-- packages/domain — schemas, validation, shared types
-- packages/ui — shared editor components
-- db/migrations — database schema, policies, indexes
-- tests — integration and end-to-end tests
-- PROJECT.md — this scope, decisions, status, and handoff
+Repository layout:
+- server/ — database adapter, domain validation, service layer, web APIs, OAuth, MCP.
+- web/ — shared editor and styling.
+- tests/ — backend integration tests.
+- scripts/check-ui.mjs — browser workflow check.
+- render.yaml — app + PostgreSQL Blueprint.
+- PROJECT.md — scope, decisions, status, and handoff.
 
-Cost planning, checked 2026-10-09:
-- Supabase Free: $0, 500 MB database; pauses after a week of inactivity and has no automatic backups. Suitable for prototype evaluation, not a promise of production durability.
-- Supabase Pro starts at $25/month.
-- Workers has a free tier; Workers Paid has a $5/month minimum plus applicable usage.
-- Plan roughly $0 for a constrained prototype, or about $30/month baseline using paid Workers and one baseline Supabase Pro project, excluding domain, email delivery, taxes, overages, and additional environments.
-- Cloudflare D1 is a lower-cost database alternative, but adopting it would require a different auth/database design. Do not implement two backends in MVP.
-- No accounts, paid services, domain purchases, or deployment have been created by this scoping step.
+Hosting decisions:
+- Render chosen by user, replacing the earlier Cloudflare + Supabase proposal.
+- Blueprint uses free test plans because paid instance sizes have not been selected. Free database expires after 30 days; free app sleeps. Do not promise durable public storage on this configuration.
+- Small paid app + database starts around $13/month at reviewed pricing, before overages; sizing remains a deployment decision.
+- No resources or subscriptions have been created. Render's connected workspace must be confirmed before provisioning.
 
 ## 6. Proposed defaults, not yet user-approved product policy
 
 These can be changed without blocking the first implementation:
-- Guest retention: 7 days from creation, visibly disclosed; proposed specifically for AtableZ.
+- Guest retention: **one hour from creation**, explicitly confirmed by the user on 2026-10-09. Enforced server-side; signup retains the workspace.
 - Guest limits: 3 tables, 100 total entries.
 - Free account limits: 20 tables, 2,000 total entries, 50 fields per table, plus explicit byte/request limits.
 - English UI initially.
@@ -217,11 +215,11 @@ PDF/DOCX output can initially be created by ChatGPT from retrieved records; dedi
 | Milestone | Deliverable | Acceptance gate | Status |
 | --- | --- | --- | --- |
 | M0 Scope | Living plan in repo | Requirements and proposed defaults separated | Complete |
-| M1 Integration spike | Minimal real MCP + panel + auth/guest proof | Save a row, see it in panel, link account, retrieve in another conversation | Not started |
-| M2 Data foundation | Migrations, validation, ownership, revisions | Cross-user access denied; retry-safe writes; conflicts detected | Not started |
-| M3 Shared table editor | Browser/panel grid and template editing | Edits persist and appear through both interfaces | Not started |
-| M4 Reusable entries | Structured note view, query, export, history | Reuse template; filter/count accurately; undo supported edit | Not started |
-| M5 Guest/account flow | Claim, expiry, limits | Existing and new-account claims work without losing data | Not started |
+| M1 Integration spike | Minimal real MCP + panel + auth/guest proof | Save a row, see it in panel, link account, retrieve in another conversation | Local MCP/OAuth tested; live ChatGPT pending |
+| M2 Data foundation | Migrations, validation, ownership, revisions | Cross-user access denied; retry-safe writes; conflicts detected | Initial implementation tested; production migrations/restore pending |
+| M3 Shared table editor | Browser/panel grid and template editing | Edits persist and appear through both interfaces | Implemented; browser QA passed, hosted panel pending |
+| M4 Reusable entries | Structured note view, query, export, history | Reuse template; filter/count accurately; undo supported edit | Basic entry detail/export/undo implemented; advanced query and note layouts pending |
+| M5 Guest/account flow | Claim, expiry, limits | Existing and new-account claims work without losing data | Local integration tests pass; email verification/recovery pending |
 | M6 Private beta | Deployment, monitoring, recovery, plugin package | Full end-to-end checks on supported target hosts | Not started |
 | M7 Public release | Listing, policy pages, support, submission | Name check, production budget, and launch gates resolved | Not started |
 
@@ -244,15 +242,27 @@ Meaningful verification:
 | 2026-10-09 | Working name AtableZ | User selected name and existing repo |
 | 2026-10-09 | GitHub source and owner-hosted service | Explicit user preference |
 | 2026-10-09 | Tables primary; reusable structured notes share records | User table-first direction and earlier agreed model |
-| 2026-10-09 | Scope only in this step | User requested scoping before building |
-| 2026-10-09 | Cloudflare + Supabase proposed | Low initial cost and managed auth/PostgreSQL |
+| 2026-10-09 | Build authorized | User approved first implementation |
+| 2026-10-09 | Render app + Render PostgreSQL | User selected Render after cost comparison |
+| 2026-10-09 | One-hour guest preview, top navigation, direct editing | Explicit latest user requirements |
 
 Current verified state:
-- Repository was empty when inspected.
-- This document is the first deliverable.
-- No application code, deployed endpoint, database, plugin connection, or tests exist yet.
+- Initial app, shared editor, persistent backend, OAuth, MCP tools, and Render Blueprint implemented.
+- Production bundle and TypeScript check pass.
+- Six backend integration tests pass: typed writes/isolation/retries/conflicts; expiry; signup and login claim; structure undo; OAuth PKCE/code replay; MCP guest result privacy.
+- Browser QA passed at desktop and 520px panel widths: title/cell editing, reload persistence, column renaming, guest-to-account signup, and no browser runtime errors. Screenshots in docs/screenshots/.
+- Not deployed, not connected as an installed ChatGPT plugin, not publicly published.
 
-Next action: implement M1, verifying the panel and identity flow before expanding the editor.
+Known implementation limits / release gates:
+- Unsigned ChatGPT creation opens an editable preview, but subsequent chat-driven edits require account linking. Safe guest chat continuity remains an integration task; never pass preview credentials to the model.
+- Email verification/password recovery, account deletion, public legal/support pages, production backup/restore verification are not finished. Private beta only.
+- Entry details currently list fields; sectioned reusable note layouts are not complete.
+- Grid supports search, sort, and missing-required filter; advanced typed filters/aggregates and large-data pagination remain pending.
+- Undo retains ten snapshots, not a guaranteed 30-day audit history.
+- Database startup creates initial tables; versioned production migrations must precede schema evolution.
+- Name availability for AtableZ remains unchecked.
+
+Next action: confirm the Render destination, deploy the dedicated app/database, and test the real ChatGPT guest/panel/OAuth flow before finalizing the installable plugin package.
 
 Later inputs needed:
 - Hosting account/project access and final domain before deployment.
