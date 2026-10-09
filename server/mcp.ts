@@ -250,7 +250,7 @@ export async function attachMcp(
           limit: z.number().int().min(1).max(100).default(50),
         },
         annotations: { ...annotations, readOnlyHint: true },
-        _meta: authMeta,
+        _meta: { securitySchemes: authMeta.securitySchemes },
       },
       safe(async (args: any) => {
         const home = required();
@@ -347,7 +347,7 @@ export async function attachMcp(
           "Read your own workspace defaults, storage usage, teams, pending invitations and exact access grant IDs before changing settings or sharing. Does not expose credentials.",
         inputSchema: {},
         annotations: { ...annotations, readOnlyHint: true },
-        _meta: authMeta,
+        _meta: { securitySchemes: authMeta.securitySchemes },
       },
       safe(async () => {
         const home = required();
@@ -394,7 +394,7 @@ export async function attachMcp(
           destructiveHint: true,
           openWorldHint: true,
         },
-        _meta: authMeta,
+        _meta: { securitySchemes: authMeta.securitySchemes },
       },
       safe(async (args: any) => {
         const output = await changeSharing(s, required(), args, base);
