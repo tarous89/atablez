@@ -89,3 +89,7 @@ Both https://atablez.com (landing) and https://app.atablez.com (app and health e
 ## OAuth migration regression — 2026-10-09
 
 User screenshot showed `OAuth failed: invalid_request - Wrong resource` on reconnect. Cause: changing PUBLIC_URL made authorization/code exchange/refresh reject the legacy MCP resource used by the existing ChatGPT installation. Provider now treats only the two exact production HTTPS MCP URLs (app.atablez.com/mcp and atablez.onrender.com/mcp) as equivalent resources for this same service. Other origins, paths, HTTP and lookalike hosts remain rejected. Login stays on the new app host; account, PKCE, client, token rotation and ACL checks remain intact. Added HTTP regression covering both resources, consent, code exchange, refresh, authenticated MCP read and invalid resource rejection. User must retry Reconnect after the fix deploys; installed ChatGPT flow is not directly verified by local tests.
+
+## Password minimum — 2026-10-09
+
+User requested a 6-character minimum instead of 12. Signup and account password changes now enforce 6 characters, with matching validation messages. Both app and ChatGPT extension use these shared endpoints. This supersedes the previous 12-character policy; login still accepts existing passwords.

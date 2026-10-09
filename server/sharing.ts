@@ -28,7 +28,7 @@ export function sharing(app: Express, s: Store, who: any, base: string) {
         current: z.string().max(128),
         password: z
           .string()
-          .min(12, "Choose a password with at least 12 characters")
+          .min(6, "Choose a password with at least 6 characters")
           .max(128),
       })
       .parse(req.body);
