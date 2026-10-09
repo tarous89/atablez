@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-09
 Repository: https://github.com/tarous89/atablez
-Stage: private beta deployed on Render; browser custom app connected and user confirms basic data flow works. Redesign, settings, rich cells and team access implemented and locally verified; release deployment pending.
+Stage: private beta deployed on Render; browser custom app connected and user confirms basic data flow works. Redesign, settings, rich cells and team access live on the existing Render service.
 Owner: Tarek Roustom
 
 ## 1. Product and agreed direction
@@ -314,4 +314,9 @@ Delivered:
 - Stored attachments inherit table access. Limits and storage cleanup are documented in the scope. Existing private-only tables remain private until explicitly shared.
 - Owner-only global undo, transactional write/grant coordination and scoped hydration prevent cross-table access leaks. Editors can change rows/schema; only owners manage grants or delete tables/workspaces.
 
-Deployment: queued for the existing Render service after source commit. No new compute/database or paid infrastructure. Existing free database expiry remains 2026-11-08; upgrade before relying on permanent storage past that date.
+Deployment: main release 7d9827a032775c99eb4e4a2b5f7980f29bfe4110 is live (Render dep-db4cjle0tbcc73ctr6hg). A follow-up adds empty-workspace undo for deleting the last table. No new compute/database or paid infrastructure. Existing free database expiry remains 2026-11-08; upgrade before relying on permanent storage past that date.
+
+
+Release verification: the connected AtableZ app’s open_workspace tool succeeded against the new release, returning the saved workspace with the new permission-aware response. Hosted /health and /settings succeed. Local sandbox verification is a protocol-level host simulation; exact rendered ChatGPT visual inspection remains unverified. No real invitations were sent during testing.
+
+Hosted guest verification passed: progress schema and persisted rows, authenticated upload/download round trip on Postgres, sandbox-origin requests and /settings. The temporary verification workspace expires automatically after one hour. Empty-workspace undo also passed in the sandboxed browser test.

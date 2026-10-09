@@ -559,6 +559,15 @@ function App() {
         <main className="home">
           <div className="page-heading">
             <h1>Tables</h1>
+            {w.canUndo && !w.tables.length && (
+              <button
+                className="outline"
+                onClick={() => run(() => change({ action: "undo" }))}
+              >
+                <Undo2 size={15} />
+                Undo last change
+              </button>
+            )}
             {(!w.role || w.role !== "viewer") && (
               <button className="primary" onClick={() => run(() => create())}>
                 <Plus size={16} />
@@ -2187,7 +2196,7 @@ function Structure({
       destructive &&
       table.rows.length &&
       !(await confirmAction(
-        `This change affects ${table.rows.length} entries.${removed.length ? " Removed columns: " + removed.map((f) => f.name).join(", ") + "." : ""} Review this before continuing. You can undo the change.`,
+        `This change affects ${table.rows.length} entries.${removed.length ? " Removed columns: " + removed.map((f) => f.name).join(", ") + "." : ""} Review this before continuing.`,
       ))
     )
       return;
@@ -2556,7 +2565,7 @@ function Structure({
             onClick={async () => {
               if (
                 await confirmAction(
-                  "Delete this table and all its entries? You can undo it from another table.",
+                  "Delete this table and all its entries? You can undo this change.",
                 )
               )
                 onDelete().catch((e) => setError(e.message));

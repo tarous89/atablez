@@ -225,6 +225,21 @@ try {
     "http://localhost:3000/settings"
   )
     throw Error("Settings did not open app route");
+  await frame.getByRole("button", { name: "Tables", exact: true }).click();
+  await frame.getByRole("button", { name: /Ideas for the weekend/ }).click();
+  await frame.getByLabel("Table actions").click();
+  await frame.getByRole("button", { name: "Modify table" }).click();
+  await frame
+    .getByRole("button", { name: "Delete table", exact: true })
+    .click();
+  await frame
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Confirm", exact: true })
+    .click();
+  await frame
+    .getByRole("button", { name: "Undo last change", exact: true })
+    .click();
+  await frame.getByRole("button", { name: /Ideas for the weekend/ }).waitFor();
   console.log(
     "Sandbox host passed: tool hydration, scoped API, blob image CSP, native-free confirmation, host CSV download and settings link.",
   );
