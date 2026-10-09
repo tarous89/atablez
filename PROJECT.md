@@ -357,3 +357,7 @@ Owner saved IONOS DNS. Expected root/app and Resend records observed publicly; s
 ### Custom domains activated (2026-10-09)
 
 Landing and app verified HTTPS 200; Resend domain authentication verified. Scoped sending key installed as Render secret, invitation sender configured, PUBLIC_URL switched to app.atablez.com. Legacy origin kept allowed for existing sessions. No real email sent. ChatGPT connection refresh remains separate.
+
+## OAuth migration regression — 2026-10-09
+
+User screenshot showed `OAuth failed: invalid_request - Wrong resource` on reconnect. Cause: changing PUBLIC_URL made authorization/code exchange/refresh reject the legacy MCP resource used by the existing ChatGPT installation. Provider now treats only the two exact production HTTPS MCP URLs (app.atablez.com/mcp and atablez.onrender.com/mcp) as equivalent resources for this same service. Other origins, paths, HTTP and lookalike hosts remain rejected. Login stays on the new app host; account, PKCE, client, token rotation and ACL checks remain intact. Added HTTP regression covering both resources, consent, code exchange, refresh, authenticated MCP read and invalid resource rejection. User must retry Reconnect after the fix deploys; installed ChatGPT flow is not directly verified by local tests.

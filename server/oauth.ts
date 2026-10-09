@@ -9,6 +9,17 @@ import type { Store } from "./store.ts";
 import { hash, token } from "./store.ts";
 export function oauth(s: Store, base: string): OAuthServerProvider {
   const resource = `${base}/mcp`;
+  // Both exact HTTPS endpoints identify this same service and database.
+  // Existing ChatGPT installations retain the pre-migration resource URL.
+  const productionResources = [
+    "https://app.atablez.com/mcp",
+    "https://atablez.onrender.com/mcp",
+  ];
+  const resources = new Set(
+    productionResources.includes(resource) ? productionResources : [resource],
+  );
+  const acceptsResource = (requested?: URL) =>
+    !requested || resources.has(requested.href);
   const get = async (id: string, kind: string) => {
     const r = (
       await s.query(
@@ -73,7 +84,7 @@ export function oauth(s: Store, base: string): OAuthServerProvider {
       },
     },
     authorize: async (client, params, res) => {
-      if (params.resource && params.resource.href !== resource)
+      if (!acceptsResource(params.resource))
         throw new InvalidRequestError("Wrong resource");
       if (params.scopes?.some((x) => x !== "tables"))
         throw new InvalidRequestError("Unknown scope");
@@ -115,7 +126,7 @@ export function oauth(s: Store, base: string): OAuthServerProvider {
           !row ||
           row.data.clientId !== client.client_id ||
           row.data.redirectUri !== redirectUri ||
-          (requested && requested.href !== resource)
+          !acceptsResource(requested)
         )
           throw new InvalidGrantError("Invalid code");
         return issue(q, row.data.workspace, client.client_id);
@@ -124,7 +135,7 @@ export function oauth(s: Store, base: string): OAuthServerProvider {
       s.transaction(async (q) => {
         if (
           scopes?.some((x) => x !== "tables") ||
-          (requested && requested.href !== resource)
+          !acceptsResource(requested)
         )
           throw new InvalidGrantError("Invalid scope/resource");
         const r = (
