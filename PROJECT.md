@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-09
 Repository: https://github.com/tarous89/atablez
-Stage: private beta deployed on Render; hosted persistence and MCP discovery verified; private plugin created, installation and live ChatGPT validation pending.
+Stage: private beta deployed on Render; browser custom app connected and user confirms basic data flow works. Next iteration scoped: shared visual redesign, settings, rich cells and team access.
 Owner: Tarek Roustom
 
 ## 1. Product and agreed direction
@@ -18,7 +18,7 @@ Confirmed requirements:
 - Source code and living project documentation stay in this GitHub repository.
 - Owner-controlled hosting on Render, using dedicated AtableZ app and PostgreSQL services. No Cloudflare/Supabase or Sites hosting.
 - ChatGPT is the primary entry point; the website provides the same editor and access to existing work.
-- One personal workspace per user initially; no projects.
+- Existing beta: one personal workspace per user; no projects. Next iteration adds shared workspace/table access and teams as defined in docs/REDESIGN_AND_SHARING.md.
 - Top navigation only; preserve horizontal room for tables.
 - Direct click-to-edit table names, descriptions, and entry values; no edit-mode buttons.
 - Modify table opens a structure editor for column names, descriptions, data types, and filling instructions.
@@ -290,3 +290,12 @@ User confirms data works but Failed to fetch remains. Initial workspace fetch er
 
 ### Custom database naming and columns
 User requested “Your custom reusable database.” and editable workspace/columns including numbering. Applied phrase as tagline while retaining AtableZ brand. Workspace name is now directly editable on home, stored in JSONB with a backward-compatible default, revision checks, and undo. MCP change_table accepts action workspace with name. Removed fixed visual # gutter: all data columns, including user-created Integer numbering, use the same editable field definitions and cells. Structure editor now has left/right reordering alongside existing names, types, descriptions, instructions, required/fixed settings and removal. Existing stored numbering fields remain intact. Build and eight integration tests passed, including workspace name persistence/undo and editing/removing numbering without losing other values.
+
+
+## 2026-10-09 — visual redesign, Settings and team sharing scope
+
+Authoritative next-iteration scope: [docs/REDESIGN_AND_SHARING.md](docs/REDESIGN_AND_SHARING.md). This supersedes earlier personal-only scope where they conflict; existing implementation status is unchanged.
+
+User requests one consistent app/extension design and vocabulary, a minimal Things-inspired shell, Airtable-inspired rich cells, signup-copy cleanup, Settings, teams with Viewer/Editor access in each member’s own ChatGPT, links, images, files and progress bars. The scope defines navigation/copy, permissions, actual upload storage, actor-based auth migration, safe shared-table hydration, phased implementation and acceptance checks. Optional emoji remain user-controlled; no automatic column prefixes.
+
+Status: specification saved; these new features have not yet been implemented or deployed. Source inspection confirms current credentials and whole-workspace history/hydration require changes before safe table-only sharing. This documentation commit intentionally changes no runtime code.
