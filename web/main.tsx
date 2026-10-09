@@ -23,6 +23,7 @@ import {
 import type { Column, Table } from "../server/domain";
 import "./style.css";
 type Workspace = {
+  name: string;
   id: string;
   revision: number;
   expiresAt: number | null;
@@ -418,7 +419,7 @@ function App() {
           <h1>
             {error
               ? "Start fresh"
-              : "Your tables, right beside the conversation."}
+              : "Your custom reusable database."}
           </h1>
           <p>
             {embedded
@@ -446,9 +447,9 @@ function App() {
           <div className="home-title">
             <div>
               <h1>
-                My tables<span className="total">{w.tables.length}</span>
+                <Editable value={w.name || "My workspace"} label="Workspace name" className="table-title" onSave={(name) => change({ action: "workspace", name })} />
               </h1>
-              <p>A place for everything worth keeping.</p>
+              <p>Your custom reusable database.</p>
             </div>
             <div className="home-actions">
               <button
@@ -613,7 +614,6 @@ function App() {
             <table>
               <thead>
                 <tr>
-                  <th className="index-cell">#</th>
                   {t.fields.map((f) => (
                     <th key={f.id}>
                       <button
@@ -644,7 +644,6 @@ function App() {
               <tbody>
                 {rows.map((row, i) => (
                   <tr key={row.id}>
-                    <td className="index-cell">{i + 1}</td>
                     {t.fields.map((f) => (
                       <td key={f.id}>
                         <Cell
@@ -780,7 +779,7 @@ function App() {
       )}
       <footer className="app-footer">
         <span>AtableZ</span>
-        <span>Make room for what you know.</span>
+        <span>Your custom reusable database.</span>
       </footer>
     </>
   );
@@ -1031,7 +1030,7 @@ function Structure({
           ) : (
             <>
               <p className="help">
-                Give each column a clear name and describe what belongs there.
+                Rename, reorder, or remove any column. For numbering, add an Integer column; its name and values are yours to edit.
               </p>
               {fields.map((f, i) => (
                 <section className="column-card" key={f.id}>
@@ -1088,6 +1087,8 @@ function Structure({
                           ))}
                         </select>
                       </label>
+                      <button type="button" className="subtle" aria-label={`Move column ${i + 1} left`} disabled={i === 0} onClick={() => setFields((fs) => { const next = [...fs]; [next[i-1], next[i]] = [next[i], next[i-1]]; return next; })}>←</button>
+                      <button type="button" className="subtle" aria-label={`Move column ${i + 1} right`} disabled={i === fields.length - 1} onClick={() => setFields((fs) => { const next = [...fs]; [next[i], next[i+1]] = [next[i+1], next[i]]; return next; })}>→</button>
                       <button
                         className="remove-column"
                         title="Remove column"

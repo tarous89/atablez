@@ -65,6 +65,7 @@ export async function attachMcp(
         ],
         structuredContent: {
           workspaceId: id,
+          workspaceName: w.data.name ?? "My workspace",
           revision: w.revision,
           tableId: selected ?? null,
           tables: w.data.tables.map((t: any) => ({
@@ -251,9 +252,10 @@ export async function attachMcp(
       {
         title: "Update saved table",
         description:
-          "Modify AtableZ records or structure using stable IDs from read_tables. Pass the current workspace revision and unique requestId. Patches preserve unspecified fields. Do not overwrite a conflicting revision; reread first. Required fields may be blank in drafts. Removing columns or replacing fixed values requires the user to review and confirm the impact.",
+          "Rename the workspace with action workspace and name (no tableId). Modify any column, including numbering, through structure; numbering is an ordinary user-defined column. Modify AtableZ records or structure using stable IDs from read_tables. Pass the current workspace revision and unique requestId. Patches preserve unspecified fields. Do not overwrite a conflicting revision; reread first. Required fields may be blank in drafts. Removing columns or replacing fixed values requires the user to review and confirm the impact.",
         inputSchema: {
           action: z.enum([
+            "workspace",
             "metadata",
             "structure",
             "add",

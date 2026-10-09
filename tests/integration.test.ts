@@ -283,3 +283,21 @@ test("sandbox subdomain preflight allows bearer requests but rejects lookalike o
     assert.equal(r.headers.get("access-control-allow-origin"),null);
   }
 });
+
+test("workspace rename is persistent and undoable; numbering remains an editable field", async () => {
+  const g = await preview();
+  let w = await create(g);
+  w = (await call('/api/change', {action:'workspace', name:'Research workspace', revision:w.revision, requestId:randomUUID()}, g.auth)).data;
+  assert.equal((await call('/api/workspace',undefined,g.auth)).data.name,'Research workspace');
+  assert.equal(w.tables[0].rows[0].values.score,4);
+  w = (await call('/api/change',{action:'undo',revision:w.revision,requestId:randomUUID()},g.auth)).data;
+  assert.equal(w.name,'My workspace');
+  const fields = [{id:'position',name:'Number',type:'integer'},{id:'company',name:'Company',type:'string'}];
+  w = (await call('/api/change',{action:'create',name:'Numbered table',fields,rows:[{position:10,company:'Example'}],revision:w.revision,requestId:randomUUID()},g.auth)).data;
+  const t=w.tables[1];
+  w = (await call('/api/change',{action:'patch',tableId:t.id,rowId:t.rows[0].id,values:{position:25},revision:w.revision,requestId:randomUUID()},g.auth)).data;
+  assert.equal(w.tables[1].rows[0].values.position,25);
+  w = (await call('/api/change',{action:'structure',tableId:t.id,fields:[fields[1]],confirmRemoval:true,revision:w.revision,requestId:randomUUID()},g.auth)).data;
+  assert.equal(w.tables[1].fields.length,1);
+  assert.equal(w.tables[1].rows[0].values.company,'Example');
+});

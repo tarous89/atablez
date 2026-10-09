@@ -39,8 +39,9 @@ export type Table = {
   updatedAt: number;
 };
 export type State = {
+  name?: string;
   tables: Table[];
-  history: { id: string; label: string; tables: Table[]; at: number }[];
+  history: { id: string; label: string; tables: Table[]; at: number; name?: string }[];
   requests: Record<string, any>;
 };
 export class Problem extends Error {
@@ -120,7 +121,9 @@ export function apply(state: State, op: any, guest: boolean) {
   const before = structuredClone(data.tables);
   const table = data.tables.find((t) => t.id === op.tableId);
   let result: any = {};
-  if (op.action === "create") {
+  if (op.action === "workspace") {
+    data.name = name.parse(op.name);
+  } else if (op.action === "create") {
     if (data.tables.length >= (guest ? 3 : 20))
       throw new Problem(400, "Table limit reached");
     const fields = Fields.parse(op.fields);
@@ -154,6 +157,7 @@ export function apply(state: State, op: any, guest: boolean) {
     const last = data.history.pop();
     if (!last) throw new Problem(400, "Nothing to undo");
     data.tables = last.tables;
+    data.name = last.name ?? "My workspace";
     return { data, result: {} };
   } else {
     if (!table) throw new Problem(404, "Table not found");
@@ -230,6 +234,7 @@ export function apply(state: State, op: any, guest: boolean) {
     label: op.action,
     at: now,
     tables: before,
+    name: state.name ?? "My workspace",
   });
   data.history = data.history.slice(-10);
   if (JSON.stringify(data).length > 5_000_000)
@@ -239,6 +244,7 @@ export function apply(state: State, op: any, guest: boolean) {
 export function publicState(row: any) {
   return {
     id: row.id,
+    name: row.data.name ?? "My workspace",
     revision: row.revision,
     expiresAt: row.expires_at ? Number(row.expires_at) : null,
     tables: row.data.tables,
