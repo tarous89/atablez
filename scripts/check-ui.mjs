@@ -93,6 +93,50 @@ try {
   await page.getByRole("button", { name: "Share", exact: true }).waitFor();
   if (await page.locator(".preview").count())
     throw Error("Preview notice remains");
+  // Reproduce chat-specific overrides before editing the same table in Settings.
+  const browserToken = await page.evaluate(() =>
+    sessionStorage.getItem("atablez.auth"),
+  );
+  const principal = await instance.s.identify(browserToken);
+  const workspace = await instance.s.view(principal.workspace_id);
+  const chatToken = await instance.s.credential(
+    instance.s.query,
+    principal.workspace_id,
+    "access",
+    3600000,
+    "ui-test",
+  );
+  const chatChange = await fetch("http://localhost:3000/mcp", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      Authorization: "Bearer " + chatToken,
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "change_table",
+        arguments: {
+          action: "appearance",
+          tableId: workspace.tables[0].id,
+          appearance: { rowHeight: 156, tableHeight: 600 },
+          revision: workspace.revision,
+          requestId: crypto.randomUUID(),
+        },
+      },
+    }),
+  });
+  if ((await chatChange.json()).result.isError)
+    throw Error("Chat appearance setup failed");
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[aria-label="Resize row height"]')
+        ?.getAttribute("aria-valuenow") === "156",
+  );
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("heading", { name: "Usage", exact: true }).waitFor();
   if (
@@ -106,11 +150,30 @@ try {
     fullPage: true,
   });
   await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  if (
+    (await page.getByLabel("Appearance scope").inputValue()) !==
+    workspace.tables[0].id
+  )
+    throw Error("Settings failed to target the current table");
+  if (
+    (await page.getByLabel("Row height", { exact: true }).inputValue()) !==
+    "156"
+  )
+    throw Error("Settings failed to show chat row height");
+  await page.getByLabel("Table height", { exact: true }).fill("400");
+  await page.getByLabel("Table height", { exact: true }).press("Enter");
+  await page.getByText("Table appearance saved", { exact: true }).waitFor();
+  await page.getByLabel("Row height", { exact: true }).fill("9999");
+  await page.getByLabel("Row height", { exact: true }).press("Enter");
+  await page
+    .getByRole("alert")
+    .filter({ hasText: "Enter a whole number" })
+    .waitFor();
   await page
     .getByLabel("Appearance scope")
     .selectOption({ label: "Ideas for the weekend" });
   await page.getByLabel("Row height", { exact: true }).fill("104");
-  await page.getByLabel("Row height", { exact: true }).press("Tab");
+  await page.getByLabel("Row height", { exact: true }).press("Enter");
   await page.waitForTimeout(200);
   await page.getByRole("button", { name: "Add rule", exact: true }).click();
   await page.getByLabel("Rule column").selectOption("progress");
@@ -137,6 +200,12 @@ try {
       .getAttribute("aria-valuenow")) !== "104"
   )
     throw Error("Settings row height did not persist");
+  if (
+    (await page
+      .getByRole("separator", { name: "Resize table height", exact: true })
+      .getAttribute("aria-valuenow")) !== "400"
+  )
+    throw Error("Settings failed to replace chat table height");
   const barColor = await page
     .locator(".progress-track > span")
     .first()

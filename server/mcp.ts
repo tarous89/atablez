@@ -8,7 +8,7 @@ import { Fields, publicState, Problem } from "./domain.ts";
 import type { Store } from "./store.ts";
 import { Appearance, appearanceFor } from "../shared/appearance.ts";
 import { readSharing, changeSharing, accountUsage } from "./sharing.ts";
-const uri = "ui://atablez/workspace-v3.html";
+const uri = "ui://atablez/workspace-v4.html";
 export async function attachMcp(
   app: Express,
   s: Store,
@@ -139,13 +139,14 @@ export async function attachMcp(
     };
     for (const resourceUri of [
       uri,
+      "ui://atablez/workspace-v3.html",
       "ui://atablez/workspace-v2.html",
       "ui://atablez/workspace.html",
     ])
       server.registerResource(
         resourceUri === uri
           ? "workspace"
-          : `workspace-legacy-${resourceUri.includes("v2") ? "v2" : "v1"}`,
+          : `workspace-legacy-${resourceUri.split("/").at(-1)}`,
         resourceUri,
         { mimeType: "text/html;profile=mcp-app" },
         async () => ({

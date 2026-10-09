@@ -575,6 +575,7 @@ function App() {
         </main>
       ) : page === "settings" ? (
         <SettingsPage
+          initialTableId={selected}
           w={w}
           change={change}
           onAccount={() => setAccount(true)}
@@ -1705,6 +1706,79 @@ function UsageCard({ usage }: { usage: any }) {
     </section>
   );
 }
+function DimensionInput({
+  label,
+  value,
+  min,
+  max,
+  optional,
+  disabled,
+  save,
+}: {
+  label: string;
+  value: number | null | undefined;
+  min: number;
+  max: number;
+  optional: boolean;
+  disabled: boolean;
+  save: (v: number | null) => Promise<any>;
+}) {
+  const [draft, setDraft] = useState(value == null ? "" : String(value));
+  const [error, setError] = useState("");
+  const pending = useRef(false);
+  async function commit() {
+    if (pending.current) return;
+    const n = draft === "" && optional ? null : Number(draft);
+    if (
+      (draft === "" && !optional) ||
+      (n !== null && (!Number.isInteger(n) || n < min || n > max))
+    ) {
+      setError(
+        `Enter a whole number from ${min} to ${max}${optional ? ", or leave blank for automatic size" : ""}.`,
+      );
+      return;
+    }
+    setError("");
+    if (n === value || (n === null && value == null)) return;
+    pending.current = true;
+    try {
+      await save(n);
+    } finally {
+      pending.current = false;
+    }
+  }
+  return (
+    <>
+      <input
+        aria-label={label}
+        aria-invalid={!!error}
+        type="number"
+        min={min}
+        max={max}
+        step={1}
+        placeholder={optional ? "Automatic" : undefined}
+        value={draft}
+        disabled={disabled}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          setError("");
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.blur();
+          }
+        }}
+      />
+      {error && (
+        <span role="alert" className="error">
+          {error}
+        </span>
+      )}
+    </>
+  );
+}
 function AppearanceEditor({
   value,
   fields,
@@ -1758,24 +1832,15 @@ function AppearanceEditor({
         ).map(([key, label, min, max]) => (
           <label className="form-label" key={key}>
             {label}
-            <input
-              key={String(a[key])}
-              aria-label={label}
-              type="number"
+            <DimensionInput
+              key={`${key}:${String(a[key])}`}
+              label={label}
+              value={a[key]}
               min={min}
               max={max}
-              placeholder="Automatic"
-              defaultValue={a[key] ?? ""}
+              optional={key === "tableHeight" || key === "tableWidth"}
               disabled={disabled}
-              onBlur={(e) => {
-                const n =
-                  e.target.value === "" &&
-                  (key === "tableHeight" || key === "tableWidth")
-                    ? null
-                    : Number(e.target.value);
-                if (n !== a[key] && (n === null || (n >= min && n <= max)))
-                  save({ [key]: n });
-              }}
+              save={(n) => save({ [key]: n })}
             />
           </label>
         ))}
@@ -1935,6 +2000,7 @@ function AppearanceEditor({
 }
 function SettingsPage({
   w,
+  initialTableId,
   change,
   onAccount,
   onError,
@@ -1942,6 +2008,7 @@ function SettingsPage({
   onLogout,
 }: {
   w: Workspace;
+  initialTableId?: string | null;
   change: (v: any) => Promise<any>;
   onAccount: () => void;
   onError: (s: string) => void;
@@ -1954,7 +2021,8 @@ function SettingsPage({
     [current, setCurrent] = useState(""),
     [password, setPassword] = useState(""),
     [message, setMessage] = useState(""),
-    [appearanceScope, setAppearanceScope] = useState("");
+    [appearanceScope, setAppearanceScope] = useState(initialTableId || ""),
+    [saveState, setSaveState] = useState("");
   useEffect(() => {
     if (w.signedIn)
       api("account")
@@ -1970,14 +2038,22 @@ function SettingsPage({
     ? appearanceFor(w.appearance, table.appearance)
     : w.appearance || {};
   const disabled = table ? table.permission === "viewer" : w.role !== "owner";
-  const save = (patch: AppearanceValue) =>
-    act(() =>
-      change(
+  const save = async (patch: AppearanceValue) => {
+    setSaveState("Saving…");
+    try {
+      await change(
         table
           ? { action: "appearance", tableId: table.id, appearance: patch }
           : { action: "workspace", appearance: patch },
-      ),
-    );
+      );
+      setSaveState(
+        table ? "Table appearance saved" : "Workspace defaults saved",
+      );
+    } catch (e: any) {
+      setSaveState("Not saved: " + e.message);
+      onError(e.message);
+    }
+  };
   return (
     <main className="settings-page">
       <div className="page-heading">
@@ -2127,12 +2203,19 @@ function SettingsPage({
             <div className="setting-row">
               <div>
                 <h2>Appearance</h2>
-                <p>One saved look in the app and ChatGPT.</p>
+                <p>
+                  {table
+                    ? `Editing “${table.name}” in the app and ChatGPT.`
+                    : "Defaults apply where a table has no custom appearance."}
+                </p>
               </div>
               <select
                 aria-label="Appearance scope"
                 value={appearanceScope}
-                onChange={(e) => setAppearanceScope(e.target.value)}
+                onChange={(e) => {
+                  setAppearanceScope(e.target.value);
+                  setSaveState("");
+                }}
               >
                 <option value="">Workspace defaults</option>
                 {w.tables.map((t) => (
@@ -2142,6 +2225,14 @@ function SettingsPage({
                 ))}
               </select>
             </div>
+            {saveState && (
+              <p
+                role="status"
+                className={saveState.startsWith("Not saved") ? "error" : "help"}
+              >
+                {saveState}
+              </p>
+            )}
             <AppearanceEditor
               key={appearanceScope}
               value={appearance}
