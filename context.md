@@ -77,3 +77,7 @@ Build: npm run build. Integration: npm test (13 tests). Browser/sandbox: CHROMIU
 See PROJECT.md for full implementation history. Keep both context.md and PROJECT.md current, and separate prepared / deployed / DNS verified / email enabled states.
 
 Domain-preparation validation: production build/TypeScript passed. Local proxy-host checks passed for apex landing vs app/legacy editor, invitation handoff, and desktop/mobile rendering with no page overflow or browser errors. Repeat with `CHROMIUM_PATH=/tmp/atablez-chromium node --import tsx scripts/check-domains.mjs`. This verifies source behavior, not live DNS/TLS.
+
+## DNS follow-up — 2026-10-09 13:18 UTC
+
+User confirmed saving IONOS records. Public DNS checks now return the expected app CNAME, apex A 216.24.57.1 (some resolver caches still return the former IP), no apex AAAA, and all four exact Resend records. Resend verification was triggered and remains pending. HTTPS checks for custom hosts have not succeeded yet; keep PUBLIC_URL unchanged until verified. No API key created or actual invitation sent. Domain preparation release 58fb5af011931ae5669cae6efb99ed47dc5798be deployed successfully through Blueprint sync.

@@ -349,3 +349,7 @@ Regression verified through actual local MCP change_table followed by browser Se
 User confirmed ownership and requested atablez.com landing page, app.atablez.com app, and invite@atablez.com sender. Added context.md as the concise operational handoff, including exact infrastructure identities, DNS records, Resend domain and remaining migration steps. Added a responsive landing page, /welcome preview, and hostname-based root routing on the existing service; app API accepts the new app origin. Blueprint declares both hosts. The legacy Render hostname stays functional, and PUBLIC_URL is deliberately unchanged until custom DNS/TLS is verified.
 
 Resend atablez.com domain created in eu-west-1; authentication pending IONOS DNS. No API key, real emails, additional paid service, or DNS mutation. Custom domain association in Render is not yet confirmed. See context.md for exact DNS and remaining access requirements.
+
+### Domain DNS follow-up (2026-10-09)
+
+Owner saved IONOS DNS. Expected root/app and Resend records observed publicly; some root A caches remain stale. Resend verification triggered, pending. Custom HTTPS and canonical URL migration remain unverified; no sender secret or test email created. See context.md.
