@@ -1305,3 +1305,213 @@ select.chip {
   margin-top: 4px;
   margin-bottom: 4px;
 }
+/* Shared, persisted table appearance. */
+.styled-table .grid-wrap {
+  border-top: 3px solid var(--table-accent);
+}
+.styled-table th {
+  background: var(--header-color);
+}
+.styled-table td {
+  height: var(--row-height);
+  position: relative;
+}
+.styled-table .cell {
+  min-height: calc(var(--row-height) - 2px);
+  color: inherit;
+}
+.styled-table .cell input,
+.styled-table .cell textarea {
+  color: inherit;
+}
+.styled-table .progress-track > span {
+  background: var(--bar-color, var(--progress-color, var(--table-accent)));
+}
+.resize-handle {
+  touch-action: none;
+}
+.resize-y {
+  cursor: row-resize;
+  height: 8px;
+  width: 100%;
+  left: 0;
+  top: auto;
+  bottom: -3px;
+}
+.table-size-handles {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  height: 12px;
+  position: relative;
+}
+.table-size-handles .resize-handle {
+  position: relative;
+  width: 32px;
+  height: 8px;
+  background: #dce2ec;
+  border-radius: 8px;
+  top: 2px;
+  right: auto;
+}
+.table-size-handles .resize-handle:hover {
+  background: var(--table-accent);
+}
+.settings-page {
+  max-width: 960px;
+}
+.settings-stack {
+  display: grid;
+  gap: 18px;
+}
+.settings-card {
+  background: white;
+  border: 1px solid #e4e8ef;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 2px 4px #18243a03;
+}
+.settings-card h2 {
+  margin: 0 0 16px;
+  font-size: 16px;
+}
+.settings-card h3 {
+  font-size: 14px;
+  margin: 24px 0 12px;
+}
+.settings-card .setting-row {
+  margin: 0;
+  gap: 24px;
+}
+.settings-card .setting-row h2 {
+  margin-bottom: 4px;
+}
+.settings-card .setting-row > select {
+  max-width: 260px;
+}
+.usage-item {
+  margin-top: 22px;
+}
+.usage-item > div {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 9px;
+}
+.usage-item span {
+  color: #677386;
+  font-variant-numeric: tabular-nums;
+}
+.usage-item progress {
+  width: 100%;
+  height: 7px;
+  border: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  accent-color: #2563eb;
+}
+progress::-webkit-progress-bar {
+  background: #edf1f6;
+  border-radius: 10px;
+}
+progress::-webkit-progress-value {
+  background: #2563eb;
+  border-radius: 10px;
+}
+.appearance-preview {
+  border: 1px solid #e4e8ef;
+  border-top: 3px solid;
+  border-radius: 10px;
+  overflow: hidden;
+  margin: 20px 0;
+  font-size: 13px;
+}
+.appearance-preview > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 14px 18px;
+}
+.appearance-preview progress {
+  width: 110px;
+  height: 8px;
+  align-self: center;
+}
+.appearance-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.appearance-controls input[type="color"] {
+  width: 100%;
+  height: 39px;
+  padding: 6px;
+  cursor: pointer;
+}
+.appearance-prompt {
+  padding: 12px;
+  border-radius: 8px;
+  background: #f7f8fa;
+  color: #677386;
+}
+.rule-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr 1fr 42px 24px;
+  gap: 6px;
+  margin-bottom: 8px;
+  align-items: center;
+}
+.rule-row input,
+.rule-row select {
+  min-width: 0;
+  width: 100%;
+}
+.rule-row input[type="color"] {
+  padding: 3px;
+  height: 37px;
+}
+@media (max-width: 600px) {
+  .settings-card {
+    padding: 18px;
+    border-radius: 12px;
+  }
+  .appearance-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .rule-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .settings-card .setting-row {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+}
+
+.styled-table .grid-wrap {
+  min-height: 180px;
+}
+.settings-card > .setting-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.settings-card select,
+.rule-row input:not([type="color"]) {
+  border: 1px solid #dce1e9;
+  border-radius: 7px;
+  background: white;
+  color: #4d596b;
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 13px;
+  min-height: 38px;
+}
+.settings-card select:focus,
+.rule-row input:focus {
+  outline: 2px solid #c3d5ff;
+  outline-offset: 1px;
+}
+.appearance-preview progress {
+  appearance: none;
+  border: none;
+  border-radius: 6px;
+  overflow: hidden;
+}

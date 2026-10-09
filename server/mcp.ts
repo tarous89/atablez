@@ -6,7 +6,9 @@ import type { Express } from "express";
 import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import { Fields, publicState, Problem } from "./domain.ts";
 import type { Store } from "./store.ts";
-const uri = "ui://atablez/workspace-v2.html";
+import { Appearance, appearanceFor } from "../shared/appearance.ts";
+import { readSharing, changeSharing, accountUsage } from "./sharing.ts";
+const uri = "ui://atablez/workspace-v3.html";
 export async function attachMcp(
   app: Express,
   s: Store,
@@ -70,6 +72,7 @@ export async function attachMcp(
           workspaceId: id,
           workspaceName: w.name,
           revision: w.revision,
+          appearance: w.appearance,
           workspaces: await s.list(home),
           tableId: selected ?? null,
           attachments: w.attachments,
@@ -86,6 +89,10 @@ export async function attachMcp(
                   return t
                     ? {
                         ...t,
+                        effectiveAppearance: appearanceFor(
+                          w.appearance,
+                          t.appearance,
+                        ),
                         rows: t.rows.slice(0, 50),
                         totalRows: t.rows.length,
                       }
@@ -130,9 +137,15 @@ export async function attachMcp(
         };
       }
     };
-    for (const resourceUri of [uri, "ui://atablez/workspace.html"])
+    for (const resourceUri of [
+      uri,
+      "ui://atablez/workspace-v2.html",
+      "ui://atablez/workspace.html",
+    ])
       server.registerResource(
-        resourceUri === uri ? "workspace" : "workspace-legacy",
+        resourceUri === uri
+          ? "workspace"
+          : `workspace-legacy-${resourceUri.includes("v2") ? "v2" : "v1"}`,
         resourceUri,
         { mimeType: "text/html;profile=mcp-app" },
         async () => ({
@@ -249,6 +262,7 @@ export async function attachMcp(
         );
         let output: any = {
           revision: w.revision,
+          appearance: w.appearance,
           workspaces: await s.list(home),
           tables: tables.map((t: any) => ({
             id: t.id,
@@ -265,6 +279,7 @@ export async function attachMcp(
             revision: w.revision,
             table: {
               ...t,
+              effectiveAppearance: appearanceFor(w.appearance, t.appearance),
               rows: t.rows.slice(args.offset, args.offset + args.limit),
             },
             attachments: w.attachments.filter((a: any) => a.table_id === t.id),
@@ -284,11 +299,12 @@ export async function attachMcp(
       {
         title: "Update saved table",
         description:
-          "Rename the workspace with action workspace and name (no tableId). Modify any column, including numbering, through structure; numbering is an ordinary user-defined column. Modify AtableZ records or structure using stable IDs from read_tables. Pass the current workspace revision and unique requestId. Patches preserve unspecified fields. Do not overwrite a conflicting revision; reread first. Pass workspaceId for shared tables. Viewer permissions never allow writes. Progress is a numeric value from 0 to 100; images/files store attachment IDs uploaded through the app. Required fields may be blank in drafts. Removing columns or replacing fixed values requires the user to review and confirm the impact.",
+          "Change saved table styling with action appearance: rowHeight/columnWidth/tableWidth/tableHeight in pixels, hex accent/headerColor, columnWidths keyed by field ID, and conditional rules (lt/lte/gt/gte/eq; target background/text/bar). Save the user styling prompt alongside concrete appearance rules; never execute prompts or code. Use action workspace with appearance for defaults and applyToAll only when explicitly requested. Rename the workspace with action workspace and name (no tableId). Modify any column, including numbering, through structure; numbering is an ordinary user-defined column. Modify AtableZ records or structure using stable IDs from read_tables. Pass the current workspace revision and unique requestId. Patches preserve unspecified fields. Do not overwrite a conflicting revision; reread first. Pass workspaceId for shared tables. Viewer permissions never allow writes. Progress is a numeric value from 0 to 100; images/files store attachment IDs uploaded through the app. Required fields may be blank in drafts. Removing columns or replacing fixed values requires the user to review and confirm the impact.",
         inputSchema: {
           action: z.enum([
             "workspace",
             "metadata",
+            "appearance",
             "structure",
             "add",
             "patch",
@@ -302,6 +318,8 @@ export async function attachMcp(
           name: z.string().optional(),
           density: z.enum(["comfortable", "compact"]).optional(),
           colorField: z.string().optional(),
+          appearance: Appearance.optional(),
+          applyToAll: z.boolean().optional(),
           description: z.string().optional(),
           instructions: z.string().optional(),
           fields: Fields.optional(),
@@ -319,6 +337,71 @@ export async function attachMcp(
         const id = args.workspaceId || home;
         await s.mutate(id, args, home);
         return result(id, args.tableId);
+      }),
+    );
+    server.registerTool(
+      "read_settings",
+      {
+        title: "Read settings and access",
+        description:
+          "Read your own workspace defaults, storage usage, teams, pending invitations and exact access grant IDs before changing settings or sharing. Does not expose credentials.",
+        inputSchema: {},
+        annotations: { ...annotations, readOnlyHint: true },
+        _meta: authMeta,
+      },
+      safe(async () => {
+        const home = required();
+        const output = {
+          usage: await accountUsage(s, home),
+          sharing: await readSharing(s, home),
+          appearance: (await s.view(home)).appearance,
+        };
+        return {
+          content: [{ type: "text", text: JSON.stringify(output) }],
+          structuredContent: output,
+        };
+      }),
+    );
+    server.registerTool(
+      "manage_access",
+      {
+        title: "Manage team access",
+        description:
+          "Owner-only sharing for your own workspace. Supply a unique requestId and reuse it only to retry the same operation. Read settings first to resolve exact team, invitation, grant and user IDs. Invite sends an email only when the user explicitly requests it and supplies the exact recipient; never infer a recipient. Confirm the table/workspace and Viewer/Editor role before granting access. Team membership can grant all of that team's existing permissions. Email invitations still require the owner to approve the requesting account. Never send test invitations to real people.",
+        inputSchema: {
+          requestId: z.string().min(1).max(100),
+          action: z.enum([
+            "invite",
+            "team",
+            "grantTeam",
+            "approve",
+            "role",
+            "revoke",
+            "cancel",
+            "removeMember",
+            "deleteTeam",
+          ]),
+          id: z.string().optional(),
+          tableId: z.string().optional(),
+          teamId: z.string().optional(),
+          userId: z.string().optional(),
+          name: z.string().max(80).optional(),
+          email: z.string().email().optional(),
+          role: z.enum(["viewer", "editor"]).optional(),
+        },
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: true,
+          openWorldHint: true,
+        },
+        _meta: authMeta,
+      },
+      safe(async (args: any) => {
+        const output = await changeSharing(s, required(), args, base);
+        return {
+          content: [{ type: "text", text: JSON.stringify(output) }],
+          structuredContent: output,
+        };
       }),
     );
     const transport = new StreamableHTTPServerTransport({

@@ -20,6 +20,7 @@ const browser = await chromium.launch({
   ],
 });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+page.setDefaultTimeout(12000);
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 try {
@@ -42,6 +43,37 @@ try {
       .inputValue()) !== "45"
   )
     throw Error("Progress did not persist");
+  const columnHandle = page.getByRole("separator", {
+    name: "Resize Idea",
+    exact: true,
+  });
+  const box = await columnHandle.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 90, box.y + 12);
+  await page.mouse.up();
+  await page.getByText("Saved", { exact: true }).waitFor();
+  const rowHandle = page
+    .getByRole("separator", { name: "Resize row height", exact: true })
+    .first();
+  await rowHandle.focus();
+  await rowHandle.press("ArrowDown");
+  await page.waitForTimeout(200);
+  await page.reload();
+  await page.getByRole("button", { name: /Ideas for the weekend/ }).click();
+  if (
+    (await page
+      .getByRole("separator", { name: "Resize Idea", exact: true })
+      .getAttribute("aria-valuenow")) !== "280"
+  )
+    throw Error("Column resize did not persist");
+  if (
+    (await page
+      .getByRole("separator", { name: "Resize row height", exact: true })
+      .first()
+      .getAttribute("aria-valuenow")) !== "60"
+  )
+    throw Error("Row resize did not persist");
   await page.screenshot({ path: "/tmp/atablez-table.png", fullPage: true });
   await page.getByLabel("Table actions").click();
   await page.getByRole("button", { name: "Modify table" }).click();
@@ -62,7 +94,34 @@ try {
   if (await page.locator(".preview").count())
     throw Error("Preview notice remains");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Team & access" }).click();
+  await page.getByRole("heading", { name: "Usage", exact: true }).waitFor();
+  if (
+    (await page
+      .getByRole("progressbar", { name: "files usage" })
+      .getAttribute("max")) !== String(20 * 1048576)
+  )
+    throw Error("Incorrect file allowance");
+  await page.screenshot({
+    path: "/tmp/atablez-general-v3.png",
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "Workspace", exact: true }).click();
+  await page
+    .getByLabel("Appearance scope")
+    .selectOption({ label: "Ideas for the weekend" });
+  await page.getByLabel("Row height", { exact: true }).fill("104");
+  await page.getByLabel("Row height", { exact: true }).press("Tab");
+  await page.waitForTimeout(200);
+  await page.getByRole("button", { name: "Add rule", exact: true }).click();
+  await page.getByLabel("Rule column").selectOption("progress");
+  await page.getByLabel("Rule value").fill("50");
+  await page.getByRole("button", { name: "Save rules", exact: true }).click();
+  await page.waitForTimeout(200);
+  await page.screenshot({
+    path: "/tmp/atablez-workspace-v3.png",
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "Team", exact: true }).click();
   await page.getByLabel("Team name", { exact: true }).fill("Family");
   await page.getByRole("button", { name: "Create team", exact: true }).click();
   await page.getByLabel("Rename team").waitFor();
@@ -71,6 +130,19 @@ try {
   await page.getByRole("heading", { name: "Settings", exact: true }).waitFor();
   await page.getByRole("button", { name: "Tables", exact: true }).click();
   await page.getByRole("button", { name: /Ideas for the weekend/ }).click();
+  if (
+    (await page
+      .getByRole("separator", { name: "Resize row height", exact: true })
+      .first()
+      .getAttribute("aria-valuenow")) !== "104"
+  )
+    throw Error("Settings row height did not persist");
+  const barColor = await page
+    .locator(".progress-track > span")
+    .first()
+    .evaluate((el) => getComputedStyle(el).backgroundColor);
+  if (barColor !== "rgb(220, 38, 38)")
+    throw Error("Conditional progress color not applied: " + barColor);
   await page.getByLabel("Table actions").click();
   await page.getByRole("button", { name: "Modify table" }).click();
   await page.getByRole("button", { name: "Add column", exact: true }).click();

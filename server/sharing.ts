@@ -55,183 +55,15 @@ export function sharing(app: Express, s: Store, who: any, base: string) {
   });
   app.get("/api/sharing", async (req, res) => {
     const { c } = await principal(req);
-    const teams = (
-      await s.query("SELECT * FROM teams WHERE workspace_id=$1", [
-        c.workspace_id,
-      ])
-    ).rows;
-    const members = (
-      await s.query(
-        "SELECT m.team_id,u.id,u.email FROM team_members m JOIN teams t ON t.id=m.team_id JOIN users u ON u.id=m.user_id WHERE t.workspace_id=$1",
-        [c.workspace_id],
-      )
-    ).rows;
-    const grants = (
-      await s.query(
-        `SELECT g.*,u.email,t.name AS team_name FROM grants g LEFT JOIN users u ON g.subject_type='user' AND u.id=g.subject_id LEFT JOIN teams t ON g.subject_type='team' AND t.id=g.subject_id WHERE g.workspace_id=$1`,
-        [c.workspace_id],
-      )
-    ).rows;
-    const invitations = (
-      await s.query(
-        `SELECT i.id,i.table_id,i.team_id,i.role,i.expires_at,i.status,i.applicant,u.email FROM invitations i LEFT JOIN users u ON u.id=i.applicant WHERE i.workspace_id=$1 AND i.status IN ('open','requested') AND i.expires_at>$2`,
-        [c.workspace_id, Date.now()],
-      )
-    ).rows;
-    res.json({ teams, members, grants, invitations });
+    res.json(await readSharing(s, c.workspace_id));
   });
   app.post("/api/sharing", async (req, res) => {
     const { c } = await principal(req);
-    const b = req.body;
-    res.json(
-      await s.transaction(async (q) => {
-        await q("SELECT id FROM workspaces WHERE id=$1 FOR UPDATE", [
-          c.workspace_id,
-        ]);
-        const w = await s.workspace(c.workspace_id, q);
-        const table = (id: string) => {
-          if (id !== "*" && !w.data.tables.some((t: any) => t.id === id))
-            throw new Problem(404, "Table not found");
-        };
-        if (b.action === "team") {
-          const name = z.string().trim().min(1).max(80).parse(b.name);
-          if (b.id)
-            await q(
-              "UPDATE teams SET name=$1 WHERE id=$2 AND workspace_id=$3",
-              [name, b.id, c.workspace_id],
-            );
-          else {
-            const count = (
-              await q("SELECT id FROM teams WHERE workspace_id=$1", [
-                c.workspace_id,
-              ])
-            ).rows.length;
-            if (count >= 10) throw new Problem(400, "Team limit reached");
-            await q("INSERT INTO teams VALUES($1,$2,$3)", [
-              randomUUID(),
-              c.workspace_id,
-              name,
-            ]);
-          }
-        } else if (b.action === "invite") {
-          const tid = b.tableId || "*";
-          table(tid);
-          if (
-            b.teamId &&
-            !(
-              await q("SELECT id FROM teams WHERE id=$1 AND workspace_id=$2", [
-                b.teamId,
-                c.workspace_id,
-              ])
-            ).rows.length
-          )
-            throw new Problem(404, "Team not found");
-          if (
-            (
-              await q(
-                "SELECT id FROM invitations WHERE workspace_id=$1 AND status IN ('open','requested') AND expires_at>$2",
-                [c.workspace_id, Date.now()],
-              )
-            ).rows.length >= 30
-          )
-            throw new Problem(400, "Too many pending invitations");
-          const raw = token();
-          await q(
-            "INSERT INTO invitations(id,token_hash,workspace_id,table_id,team_id,role,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7)",
-            [
-              randomUUID(),
-              hash(raw),
-              c.workspace_id,
-              tid,
-              b.teamId || null,
-              role.parse(b.role),
-              Date.now() + 7 * 86400000,
-            ],
-          );
-          return { url: `${base}/?invite=${raw}` };
-        } else if (b.action === "approve") {
-          const i = (
-            await q(
-              "SELECT * FROM invitations WHERE id=$1 AND workspace_id=$2 AND status='requested' AND expires_at>$3 FOR UPDATE",
-              [b.id, c.workspace_id, Date.now()],
-            )
-          ).rows[0];
-          if (!i) throw new Problem(404, "Request no longer available");
-          table(i.table_id);
-          if (i.team_id)
-            await q(
-              "INSERT INTO team_members VALUES($1,$2) ON CONFLICT DO NOTHING",
-              [i.team_id, i.applicant],
-            );
-          else
-            await q("INSERT INTO grants VALUES($1,$2,$3,$4,$5,$6)", [
-              randomUUID(),
-              c.workspace_id,
-              i.table_id,
-              "user",
-              i.applicant,
-              i.role,
-            ]);
-          await q("UPDATE invitations SET status='accepted' WHERE id=$1", [
-            i.id,
-          ]);
-        } else if (b.action === "grantTeam") {
-          table(b.tableId || "*");
-          if (
-            !(
-              await q("SELECT id FROM teams WHERE id=$1 AND workspace_id=$2", [
-                b.teamId,
-                c.workspace_id,
-              ])
-            ).rows.length
-          )
-            throw new Problem(404, "Team not found");
-          await q(
-            "DELETE FROM grants WHERE workspace_id=$1 AND subject_type=$2 AND subject_id=$3 AND table_id=$4",
-            [c.workspace_id, "team", b.teamId, b.tableId || "*"],
-          );
-          await q("INSERT INTO grants VALUES($1,$2,$3,$4,$5,$6)", [
-            randomUUID(),
-            c.workspace_id,
-            b.tableId || "*",
-            "team",
-            b.teamId,
-            role.parse(b.role),
-          ]);
-        } else if (b.action === "role") {
-          await q("UPDATE grants SET role=$1 WHERE id=$2 AND workspace_id=$3", [
-            role.parse(b.role),
-            b.id,
-            c.workspace_id,
-          ]);
-        } else if (b.action === "revoke") {
-          await q("DELETE FROM grants WHERE id=$1 AND workspace_id=$2", [
-            b.id,
-            c.workspace_id,
-          ]);
-        } else if (b.action === "cancel") {
-          await q(
-            "UPDATE invitations SET status='cancelled' WHERE id=$1 AND workspace_id=$2",
-            [b.id, c.workspace_id],
-          );
-        } else if (b.action === "removeMember") {
-          await q(
-            "DELETE FROM team_members WHERE team_id=$1 AND user_id=$2 AND team_id IN(SELECT id FROM teams WHERE workspace_id=$3)",
-            [b.teamId, b.userId, c.workspace_id],
-          );
-        } else if (b.action === "deleteTeam") {
-          await q(
-            "DELETE FROM grants WHERE subject_type='team' AND subject_id=$1 AND workspace_id=$2",
-            [b.id, c.workspace_id],
-          );
-          await q("DELETE FROM teams WHERE id=$1 AND workspace_id=$2", [
-            b.id,
-            c.workspace_id,
-          ]);
-        } else throw new Problem(400, "Unknown sharing action");
-        return { ok: true };
-      }),
-    );
+    res.json(await changeSharing(s, c.workspace_id, req.body, base));
+  });
+  app.get("/api/usage", async (req, res) => {
+    const c = await who(req);
+    res.json(await accountUsage(s, c.workspace_id));
   });
   app.post("/api/invitation", async (req, res) => {
     const { u } = await principal(req);
@@ -256,6 +88,11 @@ export function sharing(app: Express, s: Store, who: any, base: string) {
       ).rows[0];
       if (!i || (i.applicant && i.applicant !== u.id))
         throw new Problem(410, "Invitation is no longer available");
+      if (i.recipient && i.recipient !== u.email.toLowerCase())
+        throw new Problem(
+          403,
+          "Sign in with the email address this invitation was sent to",
+        );
       if (u.workspace_id === i.workspace_id)
         throw new Problem(400, "Send this link to your teammate");
       await q(
@@ -264,8 +101,7 @@ export function sharing(app: Express, s: Store, who: any, base: string) {
       );
     });
     res.json({
-      message:
-        "Request sent. The owner can approve you in Settings → Team & access.",
+      message: "Request sent. The owner can approve you in Settings → Team.",
     });
   });
   app.post("/api/attachments", async (req, res) => {
@@ -411,4 +247,346 @@ export function sharing(app: Express, s: Store, who: any, base: string) {
     });
     res.json(result);
   });
+}
+
+export function emailEnabled() {
+  return !!(process.env.RESEND_API_KEY && process.env.INVITE_FROM);
+}
+export async function accountUsage(s: Store, home: string) {
+  const w = await s.workspace(home);
+  const used = (
+    await s.query(
+      "SELECT coalesce(sum(size),0) AS bytes FROM attachments WHERE workspace_id=$1",
+      [home],
+    )
+  ).rows[0];
+  return {
+    files: {
+      used: Number(used.bytes),
+      limit: (w.expires_at ? 5 : 20) * 1048576,
+    },
+    tables: { used: w.data.tables.length, limit: w.expires_at ? 3 : 20 },
+    rows: {
+      used: w.data.tables.reduce((n: number, t: any) => n + t.rows.length, 0),
+      limit: w.expires_at ? 100 : 2000,
+    },
+  };
+}
+export async function readSharing(s: Store, home: string) {
+  if (!(await s.user(home)))
+    throw new Problem(401, "Create an account to share tables");
+  const teams = (
+    await s.query("SELECT * FROM teams WHERE workspace_id=$1", [home])
+  ).rows;
+  const members = (
+    await s.query(
+      "SELECT m.team_id,u.id,u.email FROM team_members m JOIN teams t ON t.id=m.team_id JOIN users u ON u.id=m.user_id WHERE t.workspace_id=$1",
+      [home],
+    )
+  ).rows;
+  const grants = (
+    await s.query(
+      `SELECT g.*,u.email,t.name AS team_name FROM grants g LEFT JOIN users u ON g.subject_type='user' AND u.id=g.subject_id LEFT JOIN teams t ON g.subject_type='team' AND t.id=g.subject_id WHERE g.workspace_id=$1`,
+      [home],
+    )
+  ).rows;
+  const invitations = (
+    await s.query(
+      `SELECT i.id,i.table_id,i.team_id,i.role,i.expires_at,i.status,i.applicant,i.recipient,i.email_status,u.email FROM invitations i LEFT JOIN users u ON u.id=i.applicant WHERE i.workspace_id=$1 AND i.status IN ('open','requested') AND i.expires_at>$2`,
+      [home, Date.now()],
+    )
+  ).rows;
+  return { teams, members, grants, invitations, emailEnabled: emailEnabled() };
+}
+export async function changeSharing(
+  s: Store,
+  home: string,
+  b: any,
+  base: string,
+) {
+  if (!(await s.user(home)))
+    throw new Problem(401, "Create an account to share tables");
+  const requestId = b.requestId
+    ? z.string().min(1).max(100).parse(b.requestId)
+    : randomUUID();
+  const fingerprint = hash(JSON.stringify(b));
+  const output = await s.transaction(async (q) => {
+    await q("SELECT id FROM workspaces WHERE id=$1 FOR UPDATE", [home]);
+    const previous = (
+      await q(
+        "SELECT fingerprint,result FROM sharing_requests WHERE workspace_id=$1 AND request_id=$2 AND expires_at>$3",
+        [home, requestId, Date.now()],
+      )
+    ).rows[0];
+    if (previous) {
+      if (previous.fingerprint !== fingerprint)
+        throw new Problem(
+          409,
+          "Request ID reused for a different sharing change",
+        );
+      return previous.result;
+    }
+    const perform = async () => {
+      if (
+        ["role", "revoke"].includes(b.action) &&
+        !(
+          await q("SELECT id FROM grants WHERE id=$1 AND workspace_id=$2", [
+            b.id,
+            home,
+          ])
+        ).rows.length
+      )
+        throw new Problem(404, "Access grant not found");
+      if (
+        b.action === "cancel" &&
+        !(
+          await q(
+            "SELECT id FROM invitations WHERE id=$1 AND workspace_id=$2",
+            [b.id, home],
+          )
+        ).rows.length
+      )
+        throw new Problem(404, "Invitation not found");
+      if (
+        (b.action === "deleteTeam" || (b.action === "team" && b.id)) &&
+        !(
+          await q("SELECT id FROM teams WHERE id=$1 AND workspace_id=$2", [
+            b.id,
+            home,
+          ])
+        ).rows.length
+      )
+        throw new Problem(404, "Team not found");
+      if (
+        b.action === "removeMember" &&
+        !(
+          await q(
+            "SELECT m.user_id FROM team_members m JOIN teams t ON t.id=m.team_id WHERE m.team_id=$1 AND m.user_id=$2 AND t.workspace_id=$3",
+            [b.teamId, b.userId, home],
+          )
+        ).rows.length
+      )
+        throw new Problem(404, "Team member not found");
+      const w = await s.workspace(home, q);
+      const table = (id: string) => {
+        if (id !== "*" && !w.data.tables.some((t: any) => t.id === id))
+          throw new Problem(404, "Table not found");
+      };
+      if (b.action === "team") {
+        const name = z.string().trim().min(1).max(80).parse(b.name);
+        if (b.id)
+          await q("UPDATE teams SET name=$1 WHERE id=$2 AND workspace_id=$3", [
+            name,
+            b.id,
+            home,
+          ]);
+        else {
+          const count = (
+            await q("SELECT id FROM teams WHERE workspace_id=$1", [home])
+          ).rows.length;
+          if (count >= 10) throw new Problem(400, "Team limit reached");
+          await q("INSERT INTO teams VALUES($1,$2,$3)", [
+            randomUUID(),
+            home,
+            name,
+          ]);
+        }
+      } else if (b.action === "invite") {
+        const recipient = b.email
+          ? z.string().email().max(254).parse(b.email).toLowerCase()
+          : null;
+        if (recipient && !emailEnabled())
+          throw new Problem(
+            503,
+            "Email invitations are not configured yet. Create an invite link instead.",
+          );
+        const daily = (
+          await q(
+            "SELECT count(*) AS n FROM invitations WHERE workspace_id=$1 AND expires_at>$2",
+            [home, Date.now() + 6 * 86400000],
+          )
+        ).rows[0];
+        if (Number(daily.n) >= 30)
+          throw new Problem(429, "Daily invitation limit reached");
+        const tid = b.tableId || "*";
+        table(tid);
+        if (
+          b.teamId &&
+          !(
+            await q("SELECT id FROM teams WHERE id=$1 AND workspace_id=$2", [
+              b.teamId,
+              home,
+            ])
+          ).rows.length
+        )
+          throw new Problem(404, "Team not found");
+        if (
+          (
+            await q(
+              "SELECT id FROM invitations WHERE workspace_id=$1 AND status IN ('open','requested') AND expires_at>$2",
+              [home, Date.now()],
+            )
+          ).rows.length >= 30
+        )
+          throw new Problem(400, "Too many pending invitations");
+        const raw = token(),
+          inviteId = randomUUID();
+        await q(
+          "INSERT INTO invitations(id,token_hash,workspace_id,table_id,team_id,role,expires_at,recipient) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+          [
+            inviteId,
+            hash(raw),
+            home,
+            tid,
+            b.teamId || null,
+            role.parse(b.role),
+            Date.now() + 7 * 86400000,
+            recipient,
+          ],
+        );
+        return { url: `${base}/?invite=${raw}`, id: inviteId, recipient };
+      } else if (b.action === "approve") {
+        const i = (
+          await q(
+            "SELECT * FROM invitations WHERE id=$1 AND workspace_id=$2 AND status='requested' AND expires_at>$3 FOR UPDATE",
+            [b.id, home, Date.now()],
+          )
+        ).rows[0];
+        if (!i) throw new Problem(404, "Request no longer available");
+        table(i.table_id);
+        if (i.team_id)
+          await q(
+            "INSERT INTO team_members VALUES($1,$2) ON CONFLICT DO NOTHING",
+            [i.team_id, i.applicant],
+          );
+        else
+          await q("INSERT INTO grants VALUES($1,$2,$3,$4,$5,$6)", [
+            randomUUID(),
+            home,
+            i.table_id,
+            "user",
+            i.applicant,
+            i.role,
+          ]);
+        await q("UPDATE invitations SET status='accepted' WHERE id=$1", [i.id]);
+      } else if (b.action === "grantTeam") {
+        table(b.tableId || "*");
+        if (
+          !(
+            await q("SELECT id FROM teams WHERE id=$1 AND workspace_id=$2", [
+              b.teamId,
+              home,
+            ])
+          ).rows.length
+        )
+          throw new Problem(404, "Team not found");
+        await q(
+          "DELETE FROM grants WHERE workspace_id=$1 AND subject_type=$2 AND subject_id=$3 AND table_id=$4",
+          [home, "team", b.teamId, b.tableId || "*"],
+        );
+        await q("INSERT INTO grants VALUES($1,$2,$3,$4,$5,$6)", [
+          randomUUID(),
+          home,
+          b.tableId || "*",
+          "team",
+          b.teamId,
+          role.parse(b.role),
+        ]);
+      } else if (b.action === "role") {
+        await q("UPDATE grants SET role=$1 WHERE id=$2 AND workspace_id=$3", [
+          role.parse(b.role),
+          b.id,
+          home,
+        ]);
+      } else if (b.action === "revoke") {
+        await q("DELETE FROM grants WHERE id=$1 AND workspace_id=$2", [
+          b.id,
+          home,
+        ]);
+      } else if (b.action === "cancel") {
+        await q(
+          "UPDATE invitations SET status='cancelled' WHERE id=$1 AND workspace_id=$2",
+          [b.id, home],
+        );
+      } else if (b.action === "removeMember") {
+        await q(
+          "DELETE FROM team_members WHERE team_id=$1 AND user_id=$2 AND team_id IN(SELECT id FROM teams WHERE workspace_id=$3)",
+          [b.teamId, b.userId, home],
+        );
+      } else if (b.action === "deleteTeam") {
+        await q(
+          "DELETE FROM grants WHERE subject_type='team' AND subject_id=$1 AND workspace_id=$2",
+          [b.id, home],
+        );
+        await q("DELETE FROM teams WHERE id=$1 AND workspace_id=$2", [
+          b.id,
+          home,
+        ]);
+      } else throw new Problem(400, "Unknown sharing action");
+      return { ok: true };
+    };
+    const result = await perform();
+    await q(
+      "INSERT INTO sharing_requests(workspace_id,request_id,fingerprint,result,expires_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(workspace_id,request_id) DO UPDATE SET fingerprint=excluded.fingerprint,result=excluded.result,expires_at=excluded.expires_at",
+      [
+        home,
+        requestId,
+        fingerprint,
+        JSON.stringify(result),
+        Date.now() + 7 * 86400000,
+      ],
+    );
+    await q("DELETE FROM sharing_requests WHERE expires_at<$1", [Date.now()]);
+    return result;
+  });
+
+  if ("recipient" in output && output.recipient) {
+    const invitation = (
+      await s.query(
+        "SELECT status,email_status FROM invitations WHERE id=$1 AND expires_at>$2",
+        [output.id, Date.now()],
+      )
+    ).rows[0];
+    if (!invitation || invitation.status !== "open")
+      return {
+        ok: true,
+        message: "Invitation is already processed or unavailable.",
+      };
+    if (invitation.email_status === "sent")
+      return { ...output, emailSent: true };
+    try {
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        signal: AbortSignal.timeout(10000),
+        headers: {
+          Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": `atablez-invite-${output.id}`,
+        },
+        body: JSON.stringify({
+          from: process.env.INVITE_FROM,
+          to: [output.recipient],
+          subject: "You’re invited to AtableZ",
+          text: `You have been invited to ${b.tableId && b.tableId !== "*" ? "a table" : "a workspace"} on AtableZ with ${b.role === "editor" ? "edit" : "read-only"} access.\n\nOpen this invitation, sign in, and request access. The owner will approve your account.\n${output.url}\n\nThis link expires in seven days. If you were not expecting this invitation, you can ignore it.`,
+        }),
+      });
+      if (!response.ok) throw new Error("Email delivery request failed");
+      await s.query("UPDATE invitations SET email_status='sent' WHERE id=$1", [
+        output.id,
+      ]);
+      return { ...output, emailSent: true };
+    } catch {
+      await s.query(
+        "UPDATE invitations SET email_status='failed' WHERE id=$1",
+        [output.id],
+      );
+      return {
+        ...output,
+        emailSent: false,
+        message:
+          "Email could not be sent. Copy the invitation link or cancel it and retry.",
+      };
+    }
+  }
+  return output;
 }

@@ -72,5 +72,14 @@ export async function database() {
     `CREATE TABLE IF NOT EXISTS storage_budget(id integer PRIMARY KEY)`,
   );
   await query(`INSERT INTO storage_budget VALUES(1) ON CONFLICT DO NOTHING`);
+  await query(
+    `ALTER TABLE invitations ADD COLUMN IF NOT EXISTS recipient text`,
+  );
+  await query(
+    `ALTER TABLE invitations ADD COLUMN IF NOT EXISTS email_status text`,
+  );
+  await query(
+    `CREATE TABLE IF NOT EXISTS sharing_requests(workspace_id text REFERENCES workspaces(id) ON DELETE CASCADE, request_id text NOT NULL, fingerprint text NOT NULL, result jsonb NOT NULL, expires_at bigint NOT NULL, PRIMARY KEY(workspace_id,request_id))`,
+  );
   return { query, transaction, close };
 }

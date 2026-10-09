@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
+import { Appearance, type AppearanceValue } from "../shared/appearance.ts";
 export const Field = z.object({
   id: z.string().regex(/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/),
   name: z.string().trim().min(1).max(100),
@@ -48,8 +49,10 @@ export type Table = {
   rows: { id: string; values: Record<string, any> }[];
   updatedAt: number;
   colorField?: string;
+  appearance?: AppearanceValue;
 };
 export type State = {
+  appearance?: AppearanceValue;
   name?: string;
   density?: "comfortable" | "compact";
   tables: Table[];
@@ -58,6 +61,7 @@ export type State = {
     label: string;
     tables: Table[];
     at: number;
+    appearance?: AppearanceValue;
     name?: string;
     density?: "comfortable" | "compact";
   }[];
@@ -168,6 +172,20 @@ export function apply(state: State, op: any, guest: boolean) {
   const table = data.tables.find((t) => t.id === op.tableId);
   let result: any = {};
   if (op.action === "workspace") {
+    if (op.appearance !== undefined) {
+      const patch = Appearance.parse(op.appearance);
+      // Field-specific rules and widths belong to individual tables.
+      if (patch.rules?.length || Object.keys(patch.columnWidths || {}).length)
+        throw new Problem(400, "Save column rules on a specific table");
+      data.appearance = { ...data.appearance, ...patch };
+      if (op.applyToAll === true)
+        for (const t of data.tables)
+          t.appearance = {
+            ...t.appearance,
+            ...patch,
+            ...(patch.columnWidth !== undefined ? { columnWidths: {} } : {}),
+          };
+    }
     if (op.name !== undefined) data.name = name.parse(op.name);
     if (op.density !== undefined)
       data.density = z.enum(["comfortable", "compact"]).parse(op.density);
@@ -207,10 +225,27 @@ export function apply(state: State, op: any, guest: boolean) {
     data.tables = last.tables;
     data.name = last.name ?? "My workspace";
     data.density = last.density ?? "comfortable";
+    data.appearance = last.appearance;
     return { data, result: {} };
   } else {
     if (!table) throw new Problem(404, "Table not found");
-    if (op.action === "metadata") {
+    if (op.action === "appearance") {
+      const patch = Appearance.parse(op.appearance);
+      const ids = [
+        ...Object.keys(patch.columnWidths || {}),
+        ...(patch.rules || []).map((r) => r.fieldId),
+      ];
+      if (ids.some((id) => !table.fields.some((f) => f.id === id)))
+        throw new Problem(400, "Appearance references an unknown column");
+      table.appearance = {
+        ...table.appearance,
+        ...patch,
+        columnWidths: {
+          ...table.appearance?.columnWidths,
+          ...patch.columnWidths,
+        },
+      };
+    } else if (op.action === "metadata") {
       if (op.name !== undefined) table.name = name.parse(op.name);
       if (op.description !== undefined)
         table.description = z.string().max(2000).parse(op.description);
@@ -249,6 +284,16 @@ export function apply(state: State, op: any, guest: boolean) {
         return { ...r, values: valuesFor(fields, retained) };
       });
       table.fields = fields;
+      if (table.appearance) {
+        table.appearance.rules = table.appearance.rules?.filter((r) =>
+          fields.some((f) => f.id === r.fieldId),
+        );
+        table.appearance.columnWidths = Object.fromEntries(
+          Object.entries(table.appearance.columnWidths || {}).filter(([id]) =>
+            fields.some((f) => f.id === id),
+          ),
+        );
+      }
       if (op.instructions !== undefined)
         table.instructions = z.string().max(5000).parse(op.instructions);
     } else if (op.action === "add") {
@@ -298,6 +343,7 @@ export function apply(state: State, op: any, guest: boolean) {
     tables: before,
     name: state.name ?? "My workspace",
     density: state.density,
+    appearance: state.appearance,
   });
   data.history = data.history.slice(-10);
   if (JSON.stringify(data).length > 5_000_000)
@@ -309,6 +355,7 @@ export function publicState(row: any) {
     id: row.id,
     name: row.data.name ?? "My workspace",
     density: row.data.density ?? "comfortable",
+    appearance: row.data.appearance ?? {},
     revision: row.revision,
     expiresAt: row.expires_at ? Number(row.expires_at) : null,
     tables: row.data.tables,

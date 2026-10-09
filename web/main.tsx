@@ -29,9 +29,15 @@ import {
   ChevronDown,
 } from "lucide-react";
 import type { Column, Table } from "../server/domain";
+import {
+  appearanceFor,
+  matchingRules,
+  type AppearanceValue,
+} from "../shared/appearance";
 import "./style.css";
 type RichTable = Table & { permission?: string };
 type Workspace = {
+  appearance?: AppearanceValue;
   density?: string;
   name: string;
   id: string;
@@ -136,7 +142,8 @@ function App() {
     [detail, setDetail] = useState<string | null>(null);
   const [sort, setSort] = useState<{ id: string; asc: boolean } | null>(null),
     [missing, setMissing] = useState(false),
-    [widths, setWidths] = useState<Record<string, number>>({});
+    [widths, setWidths] = useState<Record<string, number>>({}),
+    [sizeDraft, setSizeDraft] = useState<AppearanceValue>({});
   const [time, setTime] = useState(Date.now()),
     [notice, setNotice] = useState("");
   const busy = useRef(false),
@@ -147,6 +154,30 @@ function App() {
     invite = params.get("invite");
   const t = w?.tables.find((t) => t.id === selected),
     readonly = t?.permission === "viewer";
+  const appearance = {
+    ...appearanceFor(w?.appearance, t?.appearance),
+    ...sizeDraft,
+  };
+  const columnWidth = (id: string) =>
+    widths[id] ||
+    appearance.columnWidths?.[id] ||
+    appearance.columnWidth ||
+    190;
+  useEffect(() => {
+    setWidths({});
+    setSizeDraft({});
+  }, [selected]);
+  async function saveAppearance(patch: AppearanceValue) {
+    if (!t || readonly) return;
+    try {
+      await change({ action: "appearance", tableId: t.id, appearance: patch });
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setWidths({});
+      setSizeDraft({});
+    }
+  }
   function navigate(next: string) {
     setPage(next);
     if (!embedded) {
@@ -640,7 +671,14 @@ function App() {
         </main>
       ) : (
         <main
-          className={"table-page " + (w.density === "compact" ? "dense" : "")}
+          className="table-page styled-table"
+          style={
+            {
+              "--row-height": `${appearance.rowHeight}px`,
+              "--table-accent": appearance.accent,
+              "--header-color": appearance.headerColor,
+            } as React.CSSProperties
+          }
         >
           <div className="table-heading">
             <Editable
@@ -728,13 +766,18 @@ function App() {
               {status}
             </span>
           </div>
-          <div className="grid-wrap">
+          <div
+            className="grid-wrap"
+            style={{
+              height: appearance.tableHeight || undefined,
+              maxHeight: appearance.tableHeight || undefined,
+              width: appearance.tableWidth || "100%",
+              maxWidth: "100%",
+            }}
+          >
             <table
               style={{
-                minWidth: t.fields.reduce(
-                  (n, f) => n + (widths[f.id] || 190),
-                  40,
-                ),
+                minWidth: t.fields.reduce((n, f) => n + columnWidth(f.id), 40),
               }}
             >
               <thead>
@@ -743,8 +786,8 @@ function App() {
                     <th
                       key={f.id}
                       style={{
-                        width: widths[f.id] || 190,
-                        minWidth: widths[f.id] || 190,
+                        width: columnWidth(f.id),
+                        minWidth: columnWidth(f.id),
                       }}
                     >
                       <button
@@ -760,29 +803,21 @@ function App() {
                         {f.required && <span className="required">*</span>}
                         {sort?.id === f.id && (sort.asc ? " ↑" : " ↓")}
                       </button>
-                      <span
-                        className="resize-handle"
-                        onPointerDown={(e) => {
-                          const start = e.clientX,
-                            initial = widths[f.id] || 190;
-                          e.currentTarget.setPointerCapture(e.pointerId);
-                          const node = e.currentTarget;
-                          const move = (ev: PointerEvent) =>
-                            setWidths((old) => ({
-                              ...old,
-                              [f.id]: Math.max(
-                                110,
-                                initial + ev.clientX - start,
-                              ),
-                            }));
-                          const end = () => {
-                            node.removeEventListener("pointermove", move);
-                            node.removeEventListener("pointerup", end);
-                          };
-                          node.addEventListener("pointermove", move);
-                          node.addEventListener("pointerup", end);
-                        }}
-                      />
+                      {!readonly && (
+                        <ResizeHandle
+                          label={`Resize ${f.name}`}
+                          axis="x"
+                          value={columnWidth(f.id)}
+                          min={80}
+                          max={1000}
+                          onPreview={(v) =>
+                            setWidths((old) => ({ ...old, [f.id]: v }))
+                          }
+                          onSave={(v) =>
+                            saveAppearance({ columnWidths: { [f.id]: v } })
+                          }
+                        />
+                      )}
                     </th>
                   ))}
                   <th className="end-cell" />
@@ -812,7 +847,25 @@ function App() {
                     }
                   >
                     {t.fields.map((f) => (
-                      <td key={f.id}>
+                      <td
+                        key={f.id}
+                        style={
+                          Object.fromEntries(
+                            matchingRules(
+                              appearance,
+                              f.id,
+                              row.values[f.id],
+                            ).map((r) => [
+                              r.target === "background"
+                                ? "backgroundColor"
+                                : r.target === "text"
+                                  ? "color"
+                                  : "--bar-color",
+                              r.color,
+                            ]),
+                          ) as React.CSSProperties
+                        }
+                      >
                         <Cell
                           field={f}
                           value={row.values[f.id]}
@@ -828,6 +881,17 @@ function App() {
                       </td>
                     ))}
                     <td className="end-cell">
+                      {!readonly && (
+                        <ResizeHandle
+                          label="Resize row height"
+                          axis="y"
+                          value={appearance.rowHeight || 52}
+                          min={32}
+                          max={240}
+                          onPreview={(v) => setSizeDraft({ rowHeight: v })}
+                          onSave={(v) => saveAppearance({ rowHeight: v })}
+                        />
+                      )}
                       <button
                         title="Open entry"
                         onClick={() => setDetail(row.id)}
@@ -860,6 +924,31 @@ function App() {
               </button>
             )}
           </div>
+          {!readonly && (
+            <div className="table-size-handles">
+              <ResizeHandle
+                label="Resize table height"
+                axis="y"
+                value={appearance.tableHeight || 500}
+                min={180}
+                max={1600}
+                onPreview={(v) => setSizeDraft({ tableHeight: v })}
+                onSave={(v) => saveAppearance({ tableHeight: v })}
+              />
+              <ResizeHandle
+                label="Resize table width"
+                axis="x"
+                value={
+                  appearance.tableWidth ||
+                  Math.min(window.innerWidth - 48, 1200)
+                }
+                min={280}
+                max={3000}
+                onPreview={(v) => setSizeDraft({ tableWidth: v })}
+                onSave={(v) => saveAppearance({ tableWidth: v })}
+              />
+            </div>
+          )}
           <div className="table-footer">
             {rows.length} {rows.length === 1 ? "row" : "rows"}
           </div>
@@ -1362,6 +1451,19 @@ function Cell({
         <div className="progress-cell">
           <div
             className={"progress-track " + (f.color || "blue")}
+            style={
+              {
+                "--progress-color": f.color
+                  ? {
+                      blue: "#2563eb",
+                      green: "#269773",
+                      amber: "#d49a1d",
+                      violet: "#8b5cf6",
+                      rose: "#dc547b",
+                    }[f.color]
+                  : undefined,
+              } as React.CSSProperties
+            }
             role="progressbar"
             aria-label={f.name}
             aria-valuenow={value ?? undefined}
@@ -1488,6 +1590,349 @@ function Cell({
     </div>
   );
 }
+function ResizeHandle({
+  label,
+  axis,
+  value,
+  min,
+  max,
+  onPreview,
+  onSave,
+}: {
+  label: string;
+  axis: "x" | "y";
+  value: number;
+  min: number;
+  max: number;
+  onPreview: (v: number) => void;
+  onSave: (v: number) => void;
+}) {
+  return (
+    <span
+      role="separator"
+      tabIndex={0}
+      aria-label={label}
+      aria-orientation={axis === "x" ? "vertical" : "horizontal"}
+      aria-valuenow={value}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      title={label}
+      className={`resize-handle resize-${axis}`}
+      onKeyDown={(e) => {
+        if (
+          ["ArrowRight", "ArrowDown", "ArrowLeft", "ArrowUp"].includes(e.key)
+        ) {
+          e.preventDefault();
+          onSave(
+            Math.max(
+              min,
+              Math.min(
+                max,
+                value + (["ArrowRight", "ArrowDown"].includes(e.key) ? 8 : -8),
+              ),
+            ),
+          );
+        }
+      }}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        const node = e.currentTarget,
+          start = axis === "x" ? e.clientX : e.clientY;
+        let next = value;
+        node.setPointerCapture(e.pointerId);
+        const move = (ev: PointerEvent) => {
+          next = Math.round(
+            Math.max(
+              min,
+              Math.min(
+                max,
+                value + (axis === "x" ? ev.clientX : ev.clientY) - start,
+              ),
+            ),
+          );
+          onPreview(next);
+        };
+        const end = () => {
+          node.removeEventListener("pointermove", move);
+          node.removeEventListener("pointerup", end);
+          node.removeEventListener("pointercancel", end);
+          onSave(next);
+        };
+        node.addEventListener("pointermove", move);
+        node.addEventListener("pointerup", end);
+        node.addEventListener("pointercancel", end);
+      }}
+    />
+  );
+}
+function UsageCard({ usage }: { usage: any }) {
+  return (
+    <section className="settings-card">
+      <h2>Usage</h2>
+      <p className="help">
+        Your own workspace. Shared tables use their owner's allowance.
+      </p>
+      {usage ? (
+        ["files", "tables", "rows"].map((key) => {
+          const item = usage[key];
+          return (
+            <div className="usage-item" key={key}>
+              <div>
+                <strong>
+                  {key === "files"
+                    ? "File storage"
+                    : key === "tables"
+                      ? "Tables"
+                      : "Rows"}
+                </strong>
+                <span>
+                  {key === "files"
+                    ? `${(item.used / 1048576).toFixed(1)} / ${item.limit / 1048576} MB`
+                    : `${item.used.toLocaleString()} / ${item.limit.toLocaleString()}`}
+                </span>
+              </div>
+              <progress
+                aria-label={key + " usage"}
+                value={item.used}
+                max={item.limit}
+              />
+            </div>
+          );
+        })
+      ) : (
+        <p>Loading usage…</p>
+      )}
+    </section>
+  );
+}
+function AppearanceEditor({
+  value,
+  fields,
+  disabled,
+  save,
+}: {
+  value: AppearanceValue;
+  fields?: Column[];
+  disabled: boolean;
+  save: (p: AppearanceValue) => Promise<any>;
+}) {
+  const a = appearanceFor(undefined, value);
+  const [rules, setRules] = useState(value.rules || []);
+  useEffect(() => setRules(value.rules || []), [JSON.stringify(value.rules)]);
+  return (
+    <div className="appearance-editor">
+      <div className="appearance-preview" style={{ borderTopColor: a.accent }}>
+        <div style={{ background: a.headerColor }}>
+          Name <span>Progress</span>
+        </div>
+        <div>
+          Example entry{" "}
+          <progress value={65} max={100} style={{ accentColor: a.accent }} />
+        </div>
+      </div>
+      <div className="appearance-controls">
+        {(
+          [
+            ["accent", "Accent"],
+            ["headerColor", "Column headers"],
+          ] as const
+        ).map(([key, label]) => (
+          <label className="form-label" key={key}>
+            {label}
+            <input
+              aria-label={label}
+              type="color"
+              value={a[key]}
+              disabled={disabled}
+              onChange={(e) => save({ [key]: e.target.value })}
+            />
+          </label>
+        ))}
+        {(
+          [
+            ["rowHeight", "Row height", 32, 240],
+            ["columnWidth", "Default column width", 80, 1000],
+            ["tableHeight", "Table height", 180, 1600],
+            ["tableWidth", "Table width", 280, 3000],
+          ] as const
+        ).map(([key, label, min, max]) => (
+          <label className="form-label" key={key}>
+            {label}
+            <input
+              key={String(a[key])}
+              aria-label={label}
+              type="number"
+              min={min}
+              max={max}
+              placeholder="Automatic"
+              defaultValue={a[key] ?? ""}
+              disabled={disabled}
+              onBlur={(e) => {
+                const n =
+                  e.target.value === "" &&
+                  (key === "tableHeight" || key === "tableWidth")
+                    ? null
+                    : Number(e.target.value);
+                if (n !== a[key] && (n === null || (n >= min && n <= max)))
+                  save({ [key]: n });
+              }}
+            />
+          </label>
+        ))}
+      </div>
+      <p className="help">
+        Sizes are in pixels. Drag table edges or ask ChatGPT to change the
+        appearance.
+      </p>
+      {value.prompt && <p className="appearance-prompt">{value.prompt}</p>}
+      {fields && (
+        <div className="conditional-rules">
+          <h3>Conditional colors</h3>
+          {rules.map((r, i) => (
+            <div className="rule-row" key={i}>
+              <select
+                aria-label="Rule column"
+                disabled={disabled}
+                value={r.fieldId}
+                onChange={(e) =>
+                  setRules(
+                    rules.map((x, j) =>
+                      j === i ? { ...x, fieldId: e.target.value } : x,
+                    ),
+                  )
+                }
+              >
+                {fields.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                aria-label="Rule condition"
+                disabled={disabled}
+                value={r.operator}
+                onChange={(e) =>
+                  setRules(
+                    rules.map((x, j) =>
+                      j === i ? { ...x, operator: e.target.value as any } : x,
+                    ),
+                  )
+                }
+              >
+                {[
+                  ["lt", "below"],
+                  ["lte", "at most"],
+                  ["gt", "above"],
+                  ["gte", "at least"],
+                  ["eq", "equals"],
+                ].map(([v, n]) => (
+                  <option key={v} value={v}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+              <input
+                aria-label="Rule value"
+                disabled={disabled}
+                value={r.value}
+                onChange={(e) =>
+                  setRules(
+                    rules.map((x, j) =>
+                      j === i
+                        ? {
+                            ...x,
+                            value:
+                              [
+                                "integer",
+                                "number",
+                                "progress",
+                                "rating",
+                              ].includes(
+                                fields.find((f) => f.id === r.fieldId)?.type ||
+                                  "",
+                              ) && e.target.value !== ""
+                                ? Number(e.target.value)
+                                : e.target.value,
+                          }
+                        : x,
+                    ),
+                  )
+                }
+              />
+              <select
+                aria-label="Rule style"
+                disabled={disabled}
+                value={r.target}
+                onChange={(e) =>
+                  setRules(
+                    rules.map((x, j) =>
+                      j === i ? { ...x, target: e.target.value as any } : x,
+                    ),
+                  )
+                }
+              >
+                <option value="background">Cell</option>
+                <option value="text">Text</option>
+                <option value="bar">Progress bar</option>
+              </select>
+              <input
+                aria-label="Rule color"
+                type="color"
+                disabled={disabled}
+                value={r.color}
+                onChange={(e) =>
+                  setRules(
+                    rules.map((x, j) =>
+                      j === i ? { ...x, color: e.target.value } : x,
+                    ),
+                  )
+                }
+              />
+              <button
+                className="icon-button"
+                disabled={disabled}
+                aria-label="Remove color rule"
+                onClick={() => setRules(rules.filter((_, j) => j !== i))}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+          <div className="actions">
+            <button
+              className="outline"
+              disabled={disabled || rules.length >= 30}
+              onClick={() =>
+                setRules([
+                  ...rules,
+                  {
+                    fieldId: fields[0].id,
+                    operator: "lt",
+                    value: 30,
+                    color: "#dc2626",
+                    target: "bar",
+                  },
+                ])
+              }
+            >
+              Add rule
+            </button>
+            {JSON.stringify(rules) !== JSON.stringify(value.rules || []) && (
+              <button
+                className="primary"
+                disabled={disabled}
+                onClick={() => save({ rules })}
+              >
+                Save rules
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 function SettingsPage({
   w,
   change,
@@ -1503,18 +1948,36 @@ function SettingsPage({
   onRefresh: () => void;
   onLogout: () => void;
 }) {
-  const [tab, setTab] = useState("workspace"),
+  const [tab, setTab] = useState("general"),
     [account, setAccount] = useState<any>(null),
+    [usage, setUsage] = useState<any>(null),
     [current, setCurrent] = useState(""),
     [password, setPassword] = useState(""),
-    [message, setMessage] = useState("");
+    [message, setMessage] = useState(""),
+    [appearanceScope, setAppearanceScope] = useState("");
   useEffect(() => {
     if (w.signedIn)
       api("account")
         .then(setAccount)
         .catch((e) => onError(e.message));
-  }, [w.signedIn]);
+    api("usage")
+      .then(setUsage)
+      .catch((e) => onError(e.message));
+  }, [w.signedIn, w.revision]);
   const act = (fn: () => Promise<any>) => fn().catch((e) => onError(e.message));
+  const table = w.tables.find((t) => t.id === appearanceScope);
+  const appearance = table
+    ? appearanceFor(w.appearance, table.appearance)
+    : w.appearance || {};
+  const disabled = table ? table.permission === "viewer" : w.role !== "owner";
+  const save = (patch: AppearanceValue) =>
+    act(() =>
+      change(
+        table
+          ? { action: "appearance", tableId: table.id, appearance: patch }
+          : { action: "workspace", appearance: patch },
+      ),
+    );
   return (
     <main className="settings-page">
       <div className="page-heading">
@@ -1530,14 +1993,14 @@ function SettingsPage({
       </div>
       <div className="settings-tabs">
         {[
+          ["general", "General"],
           ["workspace", "Workspace"],
-          ["team", "Team & access"],
-          ["account", "Account"],
+          ["team", "Team"],
         ].map(([id, title]) => (
           <button
             key={id}
             className={tab === id ? "active" : ""}
-            onClick={async () => {
+            onClick={() => {
               setTab(id);
               setMessage("");
             }}
@@ -1546,165 +2009,190 @@ function SettingsPage({
           </button>
         ))}
       </div>
-      {tab === "workspace" ? (
-        <section className="settings-section">
-          <h2>Workspace</h2>
-          <label className="form-label">
-            Name
-            <Editable
-              value={w.name}
-              label="Workspace settings name"
-              disabled={w.role !== "owner"}
-              onSave={(name) => change({ action: "workspace", name })}
-            />
-          </label>
-          <label className="form-label">
-            Row spacing
-            <select
-              aria-label="Row spacing"
-              value={w.density || "comfortable"}
-              disabled={w.role !== "owner"}
-              onChange={(e) =>
-                act(() =>
-                  change({ action: "workspace", density: e.target.value }),
-                )
-              }
-            >
-              <option value="comfortable">Comfortable</option>
-              <option value="compact">Compact</option>
-            </select>
-          </label>
-          <div className="setting-row">
-            <div>
-              <strong>File storage</strong>
-              <p>
-                {(
-                  (w.attachments || []).reduce((n, a) => n + a.size, 0) /
-                  1048576
-                ).toFixed(1)}{" "}
-                MB used
-                {w.role === "owner" ? ` of ${w.expiresAt ? 5 : 20} MB` : ""}
-              </p>
-            </div>
-            {w.signedIn && w.role === "owner" && (
-              <button
-                className="outline"
-                onClick={() =>
-                  act(async () => {
-                    const x = await api("attachments/cleanup", {});
-                    setMessage(`${x.removed} unused uploads removed.`);
-                    onRefresh();
-                  })
-                }
-              >
-                Remove unused uploads
-              </button>
-            )}
-          </div>
-          {w.signedIn && (
-            <div className="setting-row">
-              <div>
-                <strong>ChatGPT</strong>
+      {tab === "general" ? (
+        <div className="settings-stack">
+          <section className="settings-section settings-card">
+            {!w.signedIn ? (
+              <>
+                <h2>Keep your tables</h2>
                 <p>
-                  {connectedToChat
-                    ? "Your account is connected for this conversation."
-                    : "Connect AtableZ in ChatGPT to use your saved and shared tables."}
+                  Create an account to keep your tables and access them in
+                  future conversations.
                 </p>
-              </div>
-            </div>
-          )}
-          {message && (
-            <p className="success" role="status">
-              {message}
-            </p>
-          )}
-        </section>
-      ) : tab === "team" ? (
-        w.signedIn && w.id === w.homeId ? (
-          <SharingPanel tables={w.tables} onError={onError} />
-        ) : (
-          <section className="settings-section">
-            <p>
-              {w.signedIn
-                ? "Switch to your own workspace to manage your team."
-                : "Create an account to share tables with your team."}
-            </p>
-            {!w.signedIn && (
-              <button className="primary" onClick={onAccount}>
-                Create an account
-              </button>
+                <button className="primary" onClick={onAccount}>
+                  Create an account
+                </button>
+              </>
+            ) : (
+              <>
+                <h2>{account?.email || "Your account"}</h2>
+                <details className="password-settings">
+                  <summary>Change password</summary>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      act(async () => {
+                        await api("account/password", { current, password });
+                        setCurrent("");
+                        setPassword("");
+                        setMessage(
+                          "Password changed. Other sessions have been signed out.",
+                        );
+                      });
+                    }}
+                  >
+                    <label className="form-label">
+                      Current password
+                      <input
+                        type="password"
+                        autoComplete="current-password"
+                        value={current}
+                        onChange={(e) => setCurrent(e.target.value)}
+                        required
+                      />
+                    </label>
+                    <label className="form-label">
+                      New password
+                      <input
+                        type="password"
+                        autoComplete="new-password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        required
+                      />
+                    </label>
+                    <button className="primary">Save password</button>
+                  </form>
+                </details>
+                {message && <p className="success">{message}</p>}
+                <button
+                  className="text-button"
+                  onClick={() =>
+                    act(async () => {
+                      await api("auth/logout", {});
+                      setAuth("");
+                      onLogout();
+                    })
+                  }
+                >
+                  <LogOut size={15} />
+                  Sign out
+                </button>
+              </>
             )}
           </section>
-        )
-      ) : (
-        <section className="settings-section">
-          {!w.signedIn ? (
-            <>
-              <h2>Keep your tables</h2>
-              <p>
-                Create an account to keep your tables and access them in future
-                conversations.
-              </p>
-              <button className="primary" onClick={onAccount}>
-                Create an account
-              </button>
-            </>
-          ) : (
-            <>
-              <h2>{account?.email || "Your account"}</h2>
-              <details className="password-settings">
-                <summary>Change password</summary>
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
+          <UsageCard usage={usage} />
+          {w.signedIn && (
+            <section className="settings-card">
+              <div className="setting-row">
+                <div>
+                  <strong>Unused files</strong>
+                  <p>
+                    Remove uploads that are no longer attached to your tables or
+                    undo history.
+                  </p>
+                </div>
+                <button
+                  className="outline"
+                  onClick={() =>
                     act(async () => {
-                      await api("account/password", { current, password });
-                      setCurrent("");
-                      setPassword("");
-                      setMessage(
-                        "Password changed. Other sessions have been signed out.",
-                      );
-                    });
-                  }}
+                      const x = await api("attachments/cleanup", {});
+                      setMessage(`${x.removed} unused uploads removed.`);
+                      setUsage(await api("usage"));
+                      onRefresh();
+                    })
+                  }
                 >
-                  <label className="form-label">
-                    Current password
-                    <input
-                      type="password"
-                      autoComplete="current-password"
-                      value={current}
-                      onChange={(e) => setCurrent(e.target.value)}
-                      required
-                    />
-                  </label>
-                  <label className="form-label">
-                    New password
-                    <input
-                      type="password"
-                      autoComplete="new-password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                    />
-                  </label>
-                  <button className="primary">Save password</button>
-                </form>
-              </details>
-              {message && <p className="success">{message}</p>}
-              <button
-                className="text-button"
-                onClick={() =>
-                  act(async () => {
-                    await api("auth/logout", {});
-                    setAuth("");
-                    onLogout();
-                  })
-                }
+                  Remove unused uploads
+                </button>
+              </div>
+            </section>
+          )}
+        </div>
+      ) : tab === "workspace" ? (
+        <div className="settings-stack">
+          <section className="settings-card">
+            <h2>Workspace</h2>
+            <label className="form-label">
+              Name
+              <Editable
+                value={w.name}
+                label="Workspace settings name"
+                disabled={w.role !== "owner"}
+                onSave={(name) => change({ action: "workspace", name })}
+              />
+            </label>
+          </section>
+          <section className="settings-card">
+            <div className="setting-row">
+              <div>
+                <h2>Appearance</h2>
+                <p>One saved look in the app and ChatGPT.</p>
+              </div>
+              <select
+                aria-label="Appearance scope"
+                value={appearanceScope}
+                onChange={(e) => setAppearanceScope(e.target.value)}
               >
-                <LogOut size={15} />
-                Sign out
-              </button>
-            </>
+                <option value="">Workspace defaults</option>
+                {w.tables.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <AppearanceEditor
+              key={appearanceScope}
+              value={appearance}
+              fields={table?.fields}
+              disabled={disabled}
+              save={save}
+            />
+            {!table && w.role === "owner" && (
+              <div className="setting-row">
+                <p>
+                  New tables use these defaults. Existing table overrides stay
+                  saved.
+                </p>
+                <button
+                  className="outline"
+                  onClick={() =>
+                    act(async () => {
+                      if (
+                        await confirmAction(
+                          "Apply these default dimensions and colors to all tables in this workspace?",
+                        )
+                      )
+                        await change({
+                          action: "workspace",
+                          appearance: appearanceFor(undefined, w.appearance),
+                          applyToAll: true,
+                        });
+                    })
+                  }
+                >
+                  Apply to existing tables
+                </button>
+              </div>
+            )}
+          </section>
+        </div>
+      ) : w.signedIn && w.id === w.homeId ? (
+        <div className="settings-card">
+          <SharingPanel tables={w.tables} onError={onError} />
+        </div>
+      ) : (
+        <section className="settings-card">
+          <p>
+            {w.signedIn
+              ? "Switch to your own workspace to manage your team."
+              : "Create an account to share tables with your team."}
+          </p>
+          {!w.signedIn && (
+            <button className="primary" onClick={onAccount}>
+              Create an account
+            </button>
           )}
         </section>
       )}
@@ -1726,6 +2214,7 @@ function SharingPanel({
       grants: [],
       invitations: [],
     }),
+    [email, setEmail] = useState(""),
     [scope, setScope] = useState(tableId || "*"),
     [role, setRole] = useState("viewer"),
     [team, setTeam] = useState(""),
@@ -1746,7 +2235,7 @@ function SharingPanel({
     setBusy(true);
     setLocalError("");
     try {
-      const x = await api("sharing", body);
+      const x = await api("sharing", { ...body, requestId: uuid() });
       await load();
       return x;
     } catch (e: any) {
@@ -1829,14 +2318,42 @@ function SharingPanel({
               });
               if (x) setMessage("Team access saved.");
             } else {
-              const x = await act({ action: "invite", tableId: scope, role });
-              if (x) setLink(x.url);
+              const x = await act({
+                action: "invite",
+                tableId: scope,
+                role,
+                ...(email.trim() ? { email: email.trim() } : {}),
+              });
+              if (x) {
+                setLink(x.url);
+                setMessage(
+                  x.emailSent
+                    ? `Invitation sent to ${email.trim()}.`
+                    : x.message || "Invitation link created.",
+                );
+              }
             }
           }}
         >
-          {team ? "Give team access" : "Create invite link"}
+          {team
+            ? "Give team access"
+            : email.trim()
+              ? "Send invitation"
+              : "Create invite link"}
         </button>
       </div>
+      {!team && data.emailEnabled && (
+        <label className="form-label">
+          Email address
+          <input
+            type="email"
+            aria-label="Invitation email"
+            placeholder="teammate@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </label>
+      )}
       {!team && (
         <p className="help">
           Send the link to your teammate. After they sign in and request access,
@@ -1888,7 +2405,9 @@ function SharingPanel({
             <div className="access-row" key={i.id}>
               <div>
                 <strong>
-                  {i.status === "requested" ? i.email : "Waiting for a request"}
+                  {i.status === "requested"
+                    ? i.email
+                    : i.recipient || "Waiting for a request"}
                 </strong>
                 <small>
                   {i.team_id

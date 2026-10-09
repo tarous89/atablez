@@ -1,17 +1,17 @@
-import { test, before, after } from "node:test";
+import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, createHash } from "node:crypto";
 process.env.TEST_MODE = "1";
 process.env.TEST_DB = "memory";
 const { createApp } = await import("../server/index.ts");
 let instance: Awaited<ReturnType<typeof createApp>>, http: any, base: string;
-before(async () => {
+beforeEach(async () => {
   instance = await createApp();
   http = instance.app.listen(0, "127.0.0.1");
   await new Promise<void>((r) => http.once("listening", r));
   base = `http://127.0.0.1:${http.address().port}`;
 });
-after(async () => {
+afterEach(async () => {
   await new Promise<void>((r) => http.close(r));
   await instance.close();
 });
@@ -773,4 +773,220 @@ test("rich values, file validation, authorized download and reference isolation"
       .status,
     404,
   );
+});
+
+test("appearance persists through MCP, keeps records intact, supports defaults/undo, and respects shared roles", async () => {
+  const owner = await account("appearance-owner"),
+    member = await account("appearance-member");
+  let w = await create(owner);
+  const table = w.tables[0],
+    originalRows = structuredClone(table.rows);
+  const accessToken = await instance.s.credential(
+    instance.s.query,
+    owner.state.id,
+    "access",
+    3600000,
+    "test-client",
+  );
+  const patch = {
+    rowHeight: 104,
+    columnWidths: { name: 310 },
+    headerColor: "#eef2ff",
+    prompt: "Spacious rows, low scores in red",
+    rules: [
+      {
+        fieldId: "score",
+        operator: "lt",
+        value: 5,
+        color: "#dc2626",
+        target: "text",
+      },
+    ],
+  };
+  const output = await mcp(accessToken, "change_table", {
+    action: "appearance",
+    tableId: table.id,
+    appearance: patch,
+    revision: w.revision,
+    requestId: randomUUID(),
+  });
+  assert.equal(output.isError, undefined);
+  w = (await call("/api/workspace", undefined, owner.auth)).data;
+  assert.deepEqual(w.tables[0].appearance, patch);
+  assert.deepEqual(w.tables[0].rows, originalRows);
+  const change = async (body: any) => {
+    const r = await call(
+      "/api/change",
+      { revision: w.revision, requestId: randomUUID(), ...body },
+      owner.auth,
+    );
+    if (r.status === 200) w = r.data;
+    return r;
+  };
+  assert.equal(
+    (
+      await change({
+        action: "appearance",
+        tableId: table.id,
+        appearance: { rowHeight: 10000 },
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await change({
+        action: "appearance",
+        tableId: table.id,
+        appearance: { columnWidths: { unknown: 200 } },
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await change({
+        action: "appearance",
+        tableId: table.id,
+        appearance: { accent: "url(https://example.test)" },
+      })
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await change({
+        action: "appearance",
+        tableId: table.id,
+        appearance: { code: "alert(1)" },
+      })
+    ).status,
+    400,
+  );
+  await change({
+    action: "workspace",
+    appearance: { rowHeight: 64, accent: "#059669", columnWidth: 220 },
+  });
+  assert.equal(w.tables[0].appearance.rowHeight, 104);
+  await change({
+    action: "workspace",
+    appearance: { rowHeight: 64, columnWidth: 220 },
+    applyToAll: true,
+  });
+  assert.equal(w.tables[0].appearance.rowHeight, 64);
+  assert.deepEqual(w.tables[0].appearance.columnWidths, {});
+  assert.deepEqual(w.tables[0].appearance.rules, patch.rules);
+  await change({ action: "undo" });
+  assert.equal(w.tables[0].appearance.rowHeight, 104);
+  await share(owner, member, table.id);
+  const op = {
+    action: "appearance",
+    tableId: table.id,
+    workspaceId: owner.state.id,
+    appearance: { rowHeight: 80 },
+    revision: w.revision,
+    requestId: randomUUID(),
+  };
+  assert.equal((await call("/api/change", op, member.auth)).status, 403);
+  const settings = await mcp(accessToken, "read_settings", {});
+  assert.equal(settings.structuredContent.usage.tables.used, 1);
+  assert.equal(settings.structuredContent.usage.files.limit, 20 * 1048576);
+  const grant = settings.structuredContent.sharing.grants[0];
+  const changed = await mcp(accessToken, "manage_access", {
+    action: "role",
+    id: grant.id,
+    role: "editor",
+    requestId: randomUUID(),
+  });
+  assert.equal(changed.isError, undefined);
+  assert.equal((await call("/api/change", op, member.auth)).status, 200);
+  const memberToken = await instance.s.credential(
+    instance.s.query,
+    member.state.id,
+    "access",
+    3600000,
+    "test-client",
+  );
+  await mcp(memberToken, "manage_access", {
+    action: "revoke",
+    id: grant.id,
+    requestId: randomUUID(),
+  });
+  assert.equal(
+    (await call("/api/sharing", undefined, owner.auth)).data.grants.length,
+    1,
+  );
+});
+
+test("email invitations require configuration, bind recipients, report delivery failures, and deduplicate retries", async () => {
+  const owner = await account("mail-owner"),
+    recipient = await account("mail-recipient"),
+    stranger = await account("mail-stranger");
+  const email = (await instance.s.user(recipient.state.id))!.email;
+  const body = {
+    action: "invite",
+    email,
+    role: "viewer",
+    requestId: randomUUID(),
+  };
+  assert.equal((await call("/api/sharing", body, owner.auth)).status, 503);
+  assert.equal(
+    (await call("/api/sharing", undefined, owner.auth)).data.invitations.length,
+    0,
+  );
+  const originalFetch = globalThis.fetch;
+  let sends = 0,
+    fail = false;
+  process.env.RESEND_API_KEY = "test-only-key";
+  process.env.INVITE_FROM = "Test <noreply@example.test>";
+  globalThis.fetch = async (input, init) => {
+    if (input === "https://api.resend.com/emails") {
+      sends++;
+      const data = JSON.parse(String(init?.body));
+      assert.deepEqual(data.to, [email]);
+      assert.match(data.text, /owner will approve/i);
+      return new Response(
+        JSON.stringify(fail ? { error: "failed" } : { id: "test-email" }),
+        { status: fail ? 500 : 200 },
+      );
+    }
+    return originalFetch(input, init);
+  };
+  try {
+    const first = await call("/api/sharing", body, owner.auth);
+    assert.equal(first.data.emailSent, true);
+    const repeat = await call("/api/sharing", body, owner.auth);
+    assert.equal(repeat.data.url, first.data.url);
+    assert.equal(sends, 1);
+    assert.equal(
+      (await call("/api/sharing", { ...body, role: "editor" }, owner.auth))
+        .status,
+      409,
+    );
+    const token = new URL(first.data.url).searchParams.get("invite");
+    assert.equal(
+      (await call("/api/invitation", { token }, stranger.auth)).status,
+      403,
+    );
+    assert.equal(
+      (await call("/api/invitation", { token }, recipient.auth)).status,
+      200,
+    );
+    assert.equal(
+      (await call("/api/sharing", undefined, owner.auth)).data.grants.length,
+      0,
+    );
+    fail = true;
+    const failed = await call(
+      "/api/sharing",
+      { ...body, requestId: randomUUID() },
+      owner.auth,
+    );
+    assert.equal(failed.data.emailSent, false);
+    assert.ok(failed.data.url);
+  } finally {
+    globalThis.fetch = originalFetch;
+    delete process.env.RESEND_API_KEY;
+    delete process.env.INVITE_FROM;
+  }
 });
