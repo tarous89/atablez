@@ -27,6 +27,7 @@ export async function createApp() {
     const origin = req.headers.origin;
     const allowed = [
       base,
+      "https://app.atablez.com",
       "https://chatgpt.com",
       "https://web-sandbox.oaiusercontent.com",
     ];
@@ -268,6 +269,20 @@ export async function createApp() {
   });
   sharing(app, s, who, base);
   await attachMcp(app, s, provider, base, limit);
+  // The same service serves the public landing page and the authenticated app.
+  // Keep the onrender address intact for existing OAuth/ChatGPT connections.
+  app.get(["/", "/welcome"], (req, res, next) => {
+    if (
+      req.path !== "/welcome" &&
+      !["atablez.com", "www.atablez.com"].includes(req.hostname.toLowerCase())
+    )
+      return next();
+    if (req.path === "/" && (req.query.invite || req.query.connect)) {
+      res.redirect(302, "https://app.atablez.com" + req.originalUrl);
+      return;
+    }
+    res.type("html").send(readFileSync("public/landing.html", "utf8"));
+  });
   app.use(
     express.static("dist", {
       setHeaders(res) {

@@ -8,7 +8,12 @@ services:
     buildCommand: npm ci --include=dev && npm run build
     startCommand: npm start
     healthCheckPath: /health
+    domains:
+      - app.atablez.com
+      - atablez.com
     envVars:
+      - key: INVITE_FROM
+        value: AtableZ <invite@atablez.com>
       - key: NODE_ENV
         value: production
       - key: NODE_VERSION

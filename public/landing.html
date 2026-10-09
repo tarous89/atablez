@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>AtableZ — Your custom reusable database.</title>
+    <meta
+      name="description"
+      content="Turn a conversation into a table you can keep using. Save, edit and share your custom database in ChatGPT and on the web."
+    />
+    <link rel="canonical" href="https://atablez.com/" />
+    <style>
+      :root {
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        color: #182238;
+        background: #f8f9fc;
+        font-synthesis: none;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+      }
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+      button,
+      a {
+        touch-action: manipulation;
+      }
+      header,
+      main,
+      footer {
+        max-width: 1160px;
+        margin: auto;
+        padding: 0 32px;
+      }
+      header {
+        height: 92px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 750;
+        font-size: 21px;
+        letter-spacing: -0.6px;
+      }
+      .mark {
+        width: 25px;
+        height: 25px;
+        border: 2px solid #2563eb;
+        border-radius: 6px;
+        background:
+          linear-gradient(
+            transparent 30%,
+            #2563eb 30%,
+            #2563eb 38%,
+            transparent 38%
+          ),
+          linear-gradient(
+            90deg,
+            transparent 30%,
+            #2563eb 30%,
+            #2563eb 38%,
+            transparent 38%
+          );
+      }
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: #2563eb;
+        border: 1px solid #2563eb;
+        color: white;
+        border-radius: 10px;
+        padding: 13px 20px;
+        font-weight: 600;
+        font-size: 14px;
+        transition: background 0.2s;
+      }
+      .button:hover {
+        background: #174bc5;
+      }
+      .quiet {
+        background: white;
+        color: #344058;
+        border-color: #dce2ed;
+      }
+      .quiet:hover {
+        background: #edf2fc;
+      }
+      nav {
+        display: flex;
+        align-items: center;
+        gap: 26px;
+        font-size: 14px;
+      }
+      .hero {
+        text-align: center;
+        padding: 66px 0 48px;
+      }
+      .hero h1 {
+        font-size: clamp(42px, 6vw, 72px);
+        font-weight: 650;
+        line-height: 1.08;
+        letter-spacing: -3.5px;
+        max-width: 820px;
+        margin: 0 auto 26px;
+      }
+      .hero h1 span {
+        color: #2563eb;
+      }
+      .hero p {
+        max-width: 590px;
+        margin: 0 auto 28px;
+        color: #68748a;
+        font-size: 19px;
+        line-height: 1.65;
+      }
+      .actions {
+        display: flex;
+        justify-content: center;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .hint {
+        font-size: 12px !important;
+        margin-top: 17px !important;
+        color: #8490a3 !important;
+      }
+      .demo {
+        position: relative;
+        margin: 8px 0 70px;
+        background: white;
+        border: 1px solid #dde4ef;
+        border-radius: 18px;
+        box-shadow: 0 24px 65px #2637580c;
+        overflow: hidden;
+      }
+      .demo-nav {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        padding: 19px 24px;
+        border-bottom: 1px solid #e7ebf1;
+        font-size: 12px;
+        color: #8690a2;
+      }
+      .demo-nav strong {
+        color: #2f405b;
+      }
+      .demo-body {
+        display: grid;
+        grid-template-columns: 255px 1fr;
+      }
+      .conversation {
+        background: #fafbfd;
+        padding: 30px 22px;
+        border-right: 1px solid #e7ebf1;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        font-size: 13px;
+        line-height: 1.6;
+        color: #5e6c81;
+      }
+      .bubble {
+        background: #edf2ff;
+        padding: 14px;
+        border-radius: 12px;
+        color: #3b537f;
+      }
+      .reply {
+        padding: 0 4px;
+      }
+      .table-panel {
+        padding: 24px 0;
+        min-width: 0;
+      }
+      .table-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0 24px 24px;
+      }
+      .table-title h2 {
+        font-size: 19px;
+        margin: 0;
+        letter-spacing: -0.4px;
+      }
+      .example-label {
+        font-size: 11px;
+        color: #8791a2;
+      }
+      .grid {
+        overflow: auto;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+      th {
+        background: #f8f9fc;
+        color: #7c8799;
+        font-size: 11px;
+        font-weight: 500;
+      }
+      td,
+      th {
+        padding: 17px 24px;
+        border-top: 1px solid #e9edf3;
+      }
+      td {
+        color: #35445d;
+      }
+      .chip {
+        padding: 5px 8px;
+        border-radius: 5px;
+        font-size: 11px;
+      }
+      .green {
+        background: #e5f4ed;
+        color: #397b5c;
+      }
+      .purple {
+        background: #eee8fc;
+        color: #7655ab;
+      }
+      .blue {
+        background: #e9efff;
+        color: #486fb9;
+      }
+      .bar {
+        width: 92px;
+        height: 6px;
+        background: #edf0f6;
+        border-radius: 5px;
+        display: inline-block;
+        margin-right: 9px;
+        vertical-align: middle;
+        overflow: hidden;
+      }
+      .bar span {
+        height: 100%;
+        display: block;
+        background: #77a0ee;
+        border-radius: 5px;
+      }
+      .features {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 42px;
+        margin: 0 0 82px;
+      }
+      .features h2 {
+        font-size: 18px;
+        font-weight: 650;
+        letter-spacing: -0.4px;
+      }
+      .features p {
+        font-size: 14px;
+        line-height: 1.8;
+        color: #728096;
+        margin: 0;
+      }
+      .number {
+        font-size: 12px;
+        color: #2563eb;
+      }
+      .closing {
+        padding: 46px 24px;
+        background: #edf2ff;
+        border-radius: 16px;
+        text-align: center;
+        margin-bottom: 70px;
+      }
+      .closing h2 {
+        font-size: 28px;
+        letter-spacing: -0.8px;
+        margin: 0 0 14px;
+      }
+      .closing p {
+        font-size: 14px;
+        color: #68748a;
+        margin: 0 0 24px;
+      }
+      footer {
+        padding-bottom: 30px;
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        color: #8c95a5;
+        font-size: 12px;
+      }
+      a:focus-visible {
+        outline: 3px solid #93b4ff;
+        outline-offset: 4px;
+      }
+      @media (max-width: 760px) {
+        header,
+        main,
+        footer {
+          padding-left: 20px;
+          padding-right: 20px;
+        }
+        header {
+          height: 78px;
+        }
+        .hero {
+          padding-top: 40px;
+        }
+        .hero h1 {
+          letter-spacing: -2px;
+        }
+        .hero p {
+          font-size: 16px;
+        }
+        .demo-body {
+          grid-template-columns: 1fr;
+        }
+        .conversation {
+          border-right: 0;
+          border-bottom: 1px solid #e7ebf1;
+          padding: 18px;
+          gap: 10px;
+        }
+        .demo-nav {
+          padding: 16px;
+        }
+        .features {
+          grid-template-columns: 1fr;
+          gap: 22px;
+          margin-bottom: 44px;
+        }
+        .features h2 {
+          margin: 8px 0;
+        }
+        .demo {
+          margin-bottom: 40px;
+        }
+        .table-title {
+          padding: 0 18px 22px;
+        }
+        .closing {
+          margin-bottom: 35px;
+        }
+        nav .learn {
+          display: none;
+        }
+        footer {
+          flex-wrap: wrap;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/" aria-label="AtableZ home"
+        ><span class="mark" aria-hidden="true"></span>AtableZ</a
+      >
+      <nav>
+        <a class="learn" href="#how-it-works">How it works</a
+        ><a class="button quiet" data-app href="https://app.atablez.com"
+          >Open app ↗</a
+        >
+      </nav>
+    </header>
+    <main>
+      <section class="hero">
+        <h1>Your custom<br /><span>reusable database.</span></h1>
+        <p>
+          Turn what you discover in ChatGPT into tables you can keep using. Add
+          to them, make them yours, and pick up where you left off.
+        </p>
+        <div class="actions">
+          <a class="button" data-app href="https://app.atablez.com"
+            >Start a table ↗</a
+          ><a class="button quiet" href="#how-it-works">See how it works</a>
+        </div>
+        <p class="hint">
+          Try a one-hour preview. Create an account to keep your tables.
+        </p>
+      </section>
+      <section
+        class="demo"
+        aria-label="Illustration of a conversation becoming a reusable table"
+      >
+        <div class="demo-nav">
+          <strong>My workspace</strong><span>Tables</span><span>Settings</span>
+        </div>
+        <div class="demo-body">
+          <div class="conversation">
+            <div class="bubble">
+              Save these ideas in a table. Add a status and show progress as a
+              bar.
+            </div>
+            <div class="reply">
+              A table you can return to, edit, and keep adding to.
+            </div>
+            <span class="example-label">Illustrative example</span>
+          </div>
+          <div class="table-panel">
+            <div class="table-title">
+              <h2>Ideas worth keeping</h2>
+              <span class="example-label">3 entries</span>
+            </div>
+            <div class="grid">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Idea</th>
+                    <th>Status</th>
+                    <th>Progress</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Plan a weekend away</td>
+                    <td><span class="chip green">Ready</span></td>
+                    <td>
+                      <span class="bar"><span style="width: 100%"></span></span
+                      >100%
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Build a reading collection</td>
+                    <td><span class="chip purple">In progress</span></td>
+                    <td>
+                      <span class="bar"><span style="width: 65%"></span></span
+                      >65%
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>Try something new</td>
+                    <td><span class="chip blue">Exploring</span></td>
+                    <td>
+                      <span class="bar"><span style="width: 20%"></span></span
+                      >20%
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="features" id="how-it-works">
+        <article>
+          <span class="number">01 / Save</span>
+          <h2>A conversation becomes a table.</h2>
+          <p>
+            Use AtableZ in ChatGPT to save research, ideas or plans. Choose the
+            columns and reusable instructions that fit your work.
+          </p>
+        </article>
+        <article>
+          <span class="number">02 / Make it yours</span>
+          <h2>Your data. Your way of seeing it.</h2>
+          <p>
+            Edit directly or ask ChatGPT. Add progress bars, links and images.
+            Adjust sizes and colors, then keep that appearance with your table.
+          </p>
+        </article>
+        <article>
+          <span class="number">03 / Keep using it</span>
+          <h2>Pick up where you left off.</h2>
+          <p>
+            Return to your saved tables in the app or your connected ChatGPT
+            account. Share a table with read-only or editing access.
+          </p>
+        </article>
+      </section>
+      <section class="closing">
+        <h2>Keep the useful part of the conversation.</h2>
+        <p>Start with one table. Make it something you use again.</p>
+        <a class="button" data-app href="https://app.atablez.com"
+          >Open AtableZ ↗</a
+        >
+      </section>
+    </main>
+    <footer>
+      <a class="brand" href="/" style="font-size: 15px">AtableZ</a
+      ><span>Your custom reusable database.</span><span>Private beta</span>
+    </footer>
+    <script>
+      if (
+        location.hostname.endsWith(".onrender.com") ||
+        location.hostname === "localhost"
+      ) {
+        document.querySelectorAll("[data-app]").forEach((a) => (a.href = "/"));
+      }
+    </script>
+  </body>
+</html>
