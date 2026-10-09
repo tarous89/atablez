@@ -14,7 +14,17 @@ export const Field = z.object({
     "boolean",
     "select",
     "url",
+    "progress",
+    "rating",
+    "multiselect",
+    "image",
+    "files",
   ]),
+  color: z.enum(["blue", "green", "amber", "violet", "rose"]).optional(),
+  optionColors: z
+    .record(z.string(), z.enum(["blue", "green", "amber", "violet", "rose"]))
+    .optional(),
+  max: z.number().int().min(1).max(10).optional(),
   required: z.boolean().default(false),
   options: z.array(z.string().max(100)).max(100).default([]),
   fixed: z.boolean().default(false),
@@ -37,11 +47,20 @@ export type Table = {
   fields: Column[];
   rows: { id: string; values: Record<string, any> }[];
   updatedAt: number;
+  colorField?: string;
 };
 export type State = {
   name?: string;
+  density?: "comfortable" | "compact";
   tables: Table[];
-  history: { id: string; label: string; tables: Table[]; at: number; name?: string }[];
+  history: {
+    id: string;
+    label: string;
+    tables: Table[];
+    at: number;
+    name?: string;
+    density?: "comfortable" | "compact";
+  }[];
   requests: Record<string, any>;
 };
 export class Problem extends Error {
@@ -94,6 +113,33 @@ export function valuesFor(
       (typeof value !== "number" || !Number.isFinite(value))
     )
       fail();
+    if (
+      f.type === "progress" &&
+      (typeof value !== "number" ||
+        !Number.isFinite(value) ||
+        value < 0 ||
+        value > 100)
+    )
+      fail();
+    if (
+      f.type === "rating" &&
+      (!Number.isInteger(value) || value < 0 || value > (f.max ?? 5))
+    )
+      fail();
+    if (
+      f.type === "multiselect" &&
+      (!Array.isArray(value) ||
+        value.length > 100 ||
+        value.some((v) => !f.options.includes(v)))
+    )
+      fail();
+    if (
+      ["image", "files"].includes(f.type) &&
+      (!Array.isArray(value) ||
+        value.length > 10 ||
+        value.some((v) => typeof v !== "string" || !/^[a-f0-9-]{36}$/.test(v)))
+    )
+      fail();
     if (f.type === "boolean" && typeof value !== "boolean") fail();
     if (f.type === "select" && !f.options.includes(value)) fail();
     if (f.type === "url") {
@@ -122,7 +168,9 @@ export function apply(state: State, op: any, guest: boolean) {
   const table = data.tables.find((t) => t.id === op.tableId);
   let result: any = {};
   if (op.action === "workspace") {
-    data.name = name.parse(op.name);
+    if (op.name !== undefined) data.name = name.parse(op.name);
+    if (op.density !== undefined)
+      data.density = z.enum(["comfortable", "compact"]).parse(op.density);
   } else if (op.action === "create") {
     if (data.tables.length >= (guest ? 3 : 20))
       throw new Problem(400, "Table limit reached");
@@ -158,6 +206,7 @@ export function apply(state: State, op: any, guest: boolean) {
     if (!last) throw new Problem(400, "Nothing to undo");
     data.tables = last.tables;
     data.name = last.name ?? "My workspace";
+    data.density = last.density ?? "comfortable";
     return { data, result: {} };
   } else {
     if (!table) throw new Problem(404, "Table not found");
@@ -225,6 +274,19 @@ export function apply(state: State, op: any, guest: boolean) {
     } else if (op.action === "deleteTable") {
       data.tables = data.tables.filter((t) => t.id !== table.id);
     } else throw new Problem(400, "Unknown action");
+    if (op.colorField !== undefined) {
+      const id = z.string().max(64).parse(op.colorField);
+      if (id && !table.fields.some((f) => f.id === id && f.type === "select"))
+        throw new Problem(400, "Choose a single-choice field for row colours");
+      table.colorField = id;
+    }
+    if (
+      table.colorField &&
+      !table.fields.some(
+        (f) => f.id === table.colorField && f.type === "select",
+      )
+    )
+      table.colorField = "";
     table.updatedAt = now;
   }
   if (data.tables.reduce((n, t) => n + t.rows.length, 0) > (guest ? 100 : 2000))
@@ -235,6 +297,7 @@ export function apply(state: State, op: any, guest: boolean) {
     at: now,
     tables: before,
     name: state.name ?? "My workspace",
+    density: state.density,
   });
   data.history = data.history.slice(-10);
   if (JSON.stringify(data).length > 5_000_000)
@@ -245,6 +308,7 @@ export function publicState(row: any) {
   return {
     id: row.id,
     name: row.data.name ?? "My workspace",
+    density: row.data.density ?? "comfortable",
     revision: row.revision,
     expiresAt: row.expires_at ? Number(row.expires_at) : null,
     tables: row.data.tables,

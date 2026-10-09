@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  createContext,
+  useContext,
+} from "react";
 import { createRoot } from "react-dom/client";
 import { App as McpApp } from "@modelcontextprotocol/ext-apps";
 import {
@@ -6,12 +12,8 @@ import {
   Plus,
   ArrowUpRight,
   Search,
-  SlidersHorizontal,
-  ArrowLeft,
-  Clock3,
   X,
   Check,
-  ChevronRight,
   MoreHorizontal,
   Download,
   Undo2,
@@ -19,28 +21,41 @@ import {
   AlignLeft,
   Columns3,
   LogOut,
+  Settings as SettingsIcon,
+  Users,
+  Share2,
+  Paperclip,
+  ArrowLeft,
+  ChevronDown,
 } from "lucide-react";
 import type { Column, Table } from "../server/domain";
 import "./style.css";
+type RichTable = Table & { permission?: string };
 type Workspace = {
+  density?: string;
   name: string;
   id: string;
+  homeId?: string;
   revision: number;
   expiresAt: number | null;
-  tables: Table[];
+  tables: RichTable[];
   canUndo: boolean;
+  role?: string;
+  signedIn?: boolean;
+  attachments?: any[];
 };
 const embedded = window.parent !== window;
-let bridge: McpApp | undefined;
-let auth = embedded ? "" : sessionStorage.getItem("atablez.auth") || "";
-let apiBase = "";
-let pendingTool: any;
-let onTool: (result: any) => void = (r) => {
-  pendingTool = r;
-};
+let bridge: McpApp | undefined,
+  auth = embedded ? "" : sessionStorage.getItem("atablez.auth") || "",
+  apiBase = "";
+let connectedToChat = false;
+let pendingTool: any,
+  onTool: (r: any) => void = (r) => {
+    pendingTool = r;
+  };
 if (embedded) {
   bridge = new McpApp(
-    { name: "AtableZ", version: "0.1.0" },
+    { name: "AtableZ", version: "0.2.0" },
     {},
     { autoResize: true },
   );
@@ -54,7 +69,7 @@ async function api(path: string, body?: any) {
       "Content-Type": "application/json",
       ...(auth ? { Authorization: `Bearer ${auth}` } : {}),
     },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const data = await r.json();
   if (!r.ok)
@@ -63,9 +78,9 @@ async function api(path: string, body?: any) {
     });
   return data;
 }
-function setAuth(value: string) {
-  auth = value;
-  if (!embedded) sessionStorage.setItem("atablez.auth", value);
+function setAuth(v: string) {
+  auth = v;
+  if (!embedded) sessionStorage.setItem("atablez.auth", v);
 }
 const uuid = () => crypto.randomUUID();
 const newField = (): Column => ({
@@ -78,39 +93,113 @@ const newField = (): Column => ({
   options: [],
   fixed: false,
 });
+const colors = ["blue", "green", "amber", "violet", "rose"];
+const typeNames: Record<string, string> = {
+  string: "Text",
+  text: "Long text",
+  integer: "Integer",
+  number: "Number",
+  date: "Date",
+  boolean: "Checkbox",
+  select: "Choice",
+  multiselect: "Multiple choice",
+  url: "Link",
+  progress: "Progress",
+  rating: "Rating",
+  image: "Image",
+  files: "Files",
+};
+const DataContext = createContext<{
+  w: Workspace | null;
+  t?: RichTable;
+  readonly: boolean;
+}>({ w: null, readonly: false });
+async function openExternal(url: string) {
+  if (bridge) await bridge.openLink({ url });
+  else window.open(url, "_blank", "noopener,noreferrer");
+}
 function App() {
-  const [w, setW] = useState<Workspace | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [error, setError] = useState("");
-  const [loadError, setLoadError] = useState("");
-  const [status, setStatus] = useState("All changes saved");
-  const [search, setSearch] = useState("");
-  const [query, setQuery] = useState("");
-  const [structure, setStructure] = useState(false);
-  const [account, setAccount] = useState(false);
-  const [detail, setDetail] = useState<string | null>(null);
-  const [sort, setSort] = useState<{ id: string; asc: boolean } | null>(null);
-  const [time, setTime] = useState(Date.now());
-  const [connectName, setConnectName] = useState("");
-  const [filter, setFilter] = useState("");
-  const busy = useRef(false);
-  const ref = useRef(w);
+  const [w, setW] = useState<Workspace | null>(null),
+    [selected, setSelected] = useState<string | null>(null),
+    [workspaces, setWorkspaces] = useState<any[]>([]);
+  const [page, setPage] = useState(
+      location.pathname === "/settings" ? "settings" : "tables",
+    ),
+    [error, setError] = useState(""),
+    [loadError, setLoadError] = useState("");
+  const [status, setStatus] = useState(""),
+    [query, setQuery] = useState(""),
+    [structure, setStructure] = useState(false),
+    [account, setAccount] = useState(false),
+    [accountMode, setAccountMode] = useState("signup"),
+    [share, setShare] = useState(false),
+    [detail, setDetail] = useState<string | null>(null);
+  const [sort, setSort] = useState<{ id: string; asc: boolean } | null>(null),
+    [missing, setMissing] = useState(false),
+    [widths, setWidths] = useState<Record<string, number>>({});
+  const [time, setTime] = useState(Date.now()),
+    [notice, setNotice] = useState("");
+  const busy = useRef(false),
+    ref = useRef(w);
   ref.current = w;
-  const ticket = new URLSearchParams(location.search).get("connect");
-  function adopt(result: any) {
-    if (result?._meta?.auth) {
-      setAuth(result._meta.auth);
-      apiBase = result._meta.apiBase || "";
-      if (result._meta.state) setW(result._meta.state);
+  const params = new URLSearchParams(location.search),
+    ticket = params.get("connect"),
+    invite = params.get("invite");
+  const t = w?.tables.find((t) => t.id === selected),
+    readonly = t?.permission === "viewer";
+  function navigate(next: string) {
+    setPage(next);
+    if (!embedded) {
+      history.pushState(
+        {},
+        "",
+        (next === "settings" ? "/settings" : "/") + location.search,
+      );
+    }
+  }
+  async function list() {
+    try {
+      setWorkspaces(await api("workspaces"));
+    } catch {}
+  }
+  async function refresh(id = ref.current?.id) {
+    try {
+      const next = await api(
+        "workspace" + (id ? "?workspaceId=" + encodeURIComponent(id) : ""),
+      );
+      setW(next);
       setLoadError("");
-      api("workspace")
-        .then((state) => {
-          setW(state);
-          setLoadError("");
-        })
-        .catch((e) => setLoadError(e.message));
-      setSelected(result._meta.selected || null);
-      setStatus("All changes saved");
+    } catch (e: any) {
+      if ([401, 410].includes(e.status)) {
+        setW(null);
+        setAuth("");
+        setError(e.message);
+      } else if ([403, 404].includes(e.status)) {
+        setW(null);
+        setSelected(null);
+        setError("Access is no longer available.");
+        await api("workspace")
+          .then(setW)
+          .catch(() => {});
+        list();
+      } else
+        setLoadError("Could not refresh your tables. Retrying automatically…");
+    }
+  }
+  function adopt(r: any) {
+    if (r?._meta?.auth) {
+      setAuth(r._meta.auth);
+      connectedToChat = !!r._meta.accountConnected;
+      apiBase = r._meta.apiBase || "";
+      if (r._meta.state) {
+        setW(r._meta.state);
+        ref.current = r._meta.state;
+      }
+      setSelected(r._meta.selected || null);
+      setPage("tables");
+      setLoadError("");
+      refresh(r._meta.state?.id);
+      list();
     }
   }
   onTool = adopt;
@@ -119,37 +208,20 @@ function App() {
       adopt(pendingTool);
       pendingTool = null;
     }
-  }, []);
-  async function refresh() {
-    try {
-      const state = await api("workspace");
-      setW(state);
-      setLoadError("");
-    } catch (e: any) {
-      if (e.status === 410) {
-        setW(null);
-        setError(e.message);
-        setAuth("");
-      } else setLoadError(e.message);
-    }
-  }
-  useEffect(() => {
     if (!embedded) {
-      if (auth) refresh();
-      else
-        api("guest", {})
-          .then((g) => {
-            setAuth(g.auth);
-            setW(g.state);
-          })
-          .catch((e) => setError(e.message));
+      if (auth) {
+        refresh();
+        list();
+      } else start();
     }
-    if (ticket)
-      api(`connect?ticket=${encodeURIComponent(ticket)}`)
-        .then((x) => setConnectName(x.clientName))
-        .catch((e) => setError(e.message));
-    const timer = setInterval(() => setTime(Date.now()), 1000);
-    return () => clearInterval(timer);
+    const clock = setInterval(() => setTime(Date.now()), 1000);
+    const pop = () =>
+      setPage(location.pathname === "/settings" ? "settings" : "tables");
+    window.addEventListener("popstate", pop);
+    return () => {
+      clearInterval(clock);
+      window.removeEventListener("popstate", pop);
+    };
   }, []);
   useEffect(() => {
     const timer = setInterval(() => {
@@ -159,26 +231,35 @@ function App() {
         !["INPUT", "TEXTAREA", "SELECT"].includes(
           document.activeElement?.tagName || "",
         )
-      )
-        api("workspace")
-          .then((next) => {
-            setLoadError("");
-            if (
-              next.revision !== ref.current?.revision ||
-              next.expiresAt !== ref.current?.expiresAt
-            )
-              setW(next);
-          })
-          .catch((e) => {
-            if (e.status === 410) {
-              setError(e.message);
-              setW(null);
-              setAuth("");
-            } else setLoadError(e.message);
-          });
+      ) {
+        refresh();
+        list();
+      }
     }, 5000);
     return () => clearInterval(timer);
   }, []);
+  useEffect(() => {
+    if (w?.expiresAt && time >= w.expiresAt) {
+      setAuth("");
+      setW(null);
+      setError("This preview has expired. Start a new preview.");
+    }
+  }, [time, w?.expiresAt]);
+  useEffect(() => {
+    if (ticket && w?.expiresAt) setAccount(true);
+  }, [ticket, w?.expiresAt]);
+  async function start() {
+    try {
+      const g = await api("guest", {});
+      setAuth(g.auth);
+      setW(g.state);
+      setError("");
+      setLoadError("");
+      list();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
   async function change(op: any) {
     if (busy.current)
       throw new Error("Another change is saving. Try again in a moment.");
@@ -188,108 +269,91 @@ function App() {
     try {
       const next = await api("change", {
         ...op,
+        workspaceId: ref.current?.id,
         revision: ref.current?.revision,
         requestId: uuid(),
       });
       setW(next);
-      setLoadError("");
       ref.current = next;
-      setStatus("All changes saved");
+      setStatus("Saved");
+      setLoadError("");
       return next;
     } catch (e: any) {
       setError(e.message);
-      setStatus("Changes not saved");
+      setStatus("Not saved");
       throw e;
     } finally {
       busy.current = false;
     }
   }
-  const t = w?.tables.find((t) => t.id === selected);
-  const minutes = w?.expiresAt
-    ? Math.max(0, Math.ceil((w.expiresAt - time) / 60000))
-    : 0;
-  const expired = !!w?.expiresAt && time >= w.expiresAt;
-  useEffect(() => {
-    if (w?.expiresAt && time >= w.expiresAt) {
-      setAuth("");
-      setW(null);
-      setError("This one-hour preview has expired. Start a new preview.");
-    }
-  }, [time, w?.expiresAt]);
+  const run = (fn: () => Promise<any>) => {
+    fn().catch((e: any) => setError(e.message));
+  };
   async function create(sample = false) {
     const fields: Column[] = sample
       ? [
-          { ...newField(), id: "company", name: "Company" },
-          { ...newField(), id: "country", name: "Country" },
-          { ...newField(), id: "price", name: "Price (€)", type: "number" },
+          { ...newField(), id: "name", name: "Idea" },
           {
             ...newField(),
             id: "status",
             name: "Status",
             type: "select",
-            options: ["Researching", "Shortlisted", "Contacted"],
+            options: ["Exploring", "In progress", "Ready"],
           },
+          { ...newField(), id: "progress", name: "Progress", type: "progress" },
+          { ...newField(), id: "link", name: "Link", type: "url" },
           { ...newField(), id: "notes", name: "Notes", type: "text" },
         ]
       : [
           { ...newField(), name: "Name" },
-          { ...newField(), name: "Description", type: "text" },
+          { ...newField(), name: "Notes", type: "text" },
         ];
-    const rows = sample
-      ? [
-          {
-            company: "Northline Studio",
-            country: "Germany",
-            price: 2400,
-            status: "Shortlisted",
-            notes: "Illustrative data — replace with your own.",
-          },
-          {
-            company: "Forma & Co.",
-            country: "Netherlands",
-            price: 3100,
-            status: "Researching",
-            notes: "Illustrative data — replace with your own.",
-          },
-          {
-            company: "Atelier Olive",
-            country: "France",
-            price: 1800,
-            status: "Contacted",
-            notes: "Illustrative data — replace with your own.",
-          },
-        ]
-      : [];
     const next = await change({
       action: "create",
-      name: sample ? "Supplier shortlist" : "Untitled table",
-      description: sample
-        ? "A sample table to explore. All entries are fictional."
-        : "",
+      name: sample ? "Ideas to explore" : "Untitled table",
       fields,
-      rows,
+      rows: sample
+        ? [
+            {
+              name: "Plan a weekend away",
+              status: "Exploring",
+              progress: 20,
+              notes: "Sample data — make it your own.",
+            },
+            {
+              name: "Build a reading collection",
+              status: "In progress",
+              progress: 65,
+            },
+            { name: "Try something new", status: "Ready", progress: 100 },
+          ]
+        : [],
     });
     setSelected(next.result.tableId);
+    setQuery("");
+    list();
   }
-  function exportCsv() {
+  async function exportCsv() {
     if (!t) return;
     const safe = (v: any) => {
-      let text = String(v ?? "");
-      if (/^[=+@\-\t\r]/.test(text)) text = "'" + text;
-      return '"' + text.replaceAll('"', '""') + '"';
+      let s = Array.isArray(v)
+        ? v
+            .map((id) => w?.attachments?.find((a) => a.id === id)?.name || id)
+            .join("; ")
+        : String(v ?? "");
+      if (/^[=+@\-\t\r]/.test(s)) s = "'" + s;
+      return '"' + s.replaceAll('"', '""') + '"';
     };
-    const body = [
-      t.fields.map((f) => safe(f.name)).join(","),
+    const data = [
+      t.fields
+        .map((f) => safe(f.name + (f.type === "progress" ? " (%)" : "")))
+        .join(","),
       ...t.rows.map((r) => t.fields.map((f) => safe(r.values[f.id])).join(",")),
     ].join("\r\n");
-    const u = URL.createObjectURL(
-      new Blob([body], { type: "text/csv;charset=utf-8;" }),
+    await download(
+      new Blob([data], { type: "text/csv;charset=utf-8" }),
+      t.name + ".csv",
     );
-    const a = document.createElement("a");
-    a.href = u;
-    a.download = t.name.replace(/[^\w -]/g, "_") + ".csv";
-    a.click();
-    URL.revokeObjectURL(u);
   }
   let rows =
     t?.rows.filter(
@@ -300,13 +364,10 @@ function App() {
               .toLowerCase()
               .includes(query.toLowerCase()),
           )) &&
-        (!filter ||
+        (!missing ||
           t.fields.some(
             (f) =>
-              f.required &&
-              (r.values[f.id] === null ||
-                r.values[f.id] === undefined ||
-                r.values[f.id] === ""),
+              f.required && (r.values[f.id] == null || r.values[f.id] === ""),
           )),
     ) || [];
   if (sort)
@@ -321,301 +382,362 @@ function App() {
       );
     });
   return (
-    <>
+    <DataContext.Provider value={{ w, t, readonly: !!readonly }}>
       <header>
         <button
           className="brand"
-          onClick={() => {
+          onClick={async () => {
+            navigate("tables");
             setSelected(null);
             setQuery("");
           }}
+          aria-label="AtableZ home"
         >
-          <span className="brand-icon">
-            <Table2 size={20} />
-          </span>
-          Atable<span>Z</span>
+          <Table2 size={21} />
+          <span>AtableZ</span>
         </button>
-        <span className="nav-divider" />
-        <button
-          className={"nav-link " + (!t ? "active" : "")}
-          onClick={() => setSelected(null)}
-        >
-          My tables
-        </button>
-        {t && (
-          <>
-            <ChevronRight size={14} className="muted" />
-            <span className="crumb">{t.name}</span>
-          </>
-        )}
-        <div className="header-right">
-          <span className="save-status">
-            <Check size={13} />
-            {status}
-          </span>
-          <button className="account-btn" onClick={() => setAccount(true)}>
-            {w && !w.expiresAt ? "My account" : "Sign up"}
-            <ArrowUpRight size={14} />
+        <div className="workspace-nav">
+          {w && w.role !== "viewer" && w.id === (w.homeId || w.id) ? (
+            <Editable
+              label="Workspace name"
+              value={w.name}
+              onSave={(name) => change({ action: "workspace", name })}
+            />
+          ) : (
+            <span>{w?.name || "My workspace"}</span>
+          )}
+          {workspaces.length > 1 && (
+            <select
+              aria-label="Switch workspace"
+              value={w?.id || ""}
+              onChange={(e) => {
+                setSelected(null);
+                setQuery("");
+                refresh(e.target.value);
+              }}
+            >
+              {workspaces.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                  {x.shared ? " · Shared" : ""}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        <nav>
+          <button
+            className={page === "tables" ? "active" : ""}
+            onClick={async () => {
+              navigate("tables");
+              setSelected(null);
+              setQuery("");
+            }}
+          >
+            Tables
           </button>
+          <button
+            className={page === "settings" ? "active" : ""}
+            onClick={() => navigate("settings")}
+          >
+            Settings
+          </button>
+        </nav>
+        <div className="header-right">
+          {!w?.signedIn && (
+            <button
+              className="text-button"
+              onClick={async () => {
+                setAccountMode("login");
+                setAccount(true);
+              }}
+            >
+              Sign in
+            </button>
+          )}
         </div>
       </header>
       {w?.expiresAt && (
-        <div className={"preview " + (expired ? "expired" : "")}>
-          <Clock3 size={15} />
+        <div className="preview">
           <span>
-            {expired
-              ? "Your one-hour preview has expired."
-              : "This preview is available for one hour."}
-            <span className="countdown"> {minutes} min remaining</span>
+            Preview expires in{" "}
+            {Math.max(0, Math.ceil((w.expiresAt - time) / 60000))} min.
           </span>
-          <button onClick={() => setAccount(true)} disabled={expired}>
-            Sign up to store it in your account <ArrowUpRight size={14} />
+          <button
+            onClick={async () => {
+              setAccountMode("signup");
+              setAccount(true);
+            }}
+          >
+            Keep my tables <ArrowUpRight size={14} />
           </button>
         </div>
       )}
       {(error || loadError) && (
-        <div role="alert" className="error">
-          {error || (loadError === "Failed to fetch"
-            ? "Could not refresh your tables. Retrying automatically…"
-            : loadError)}
+        <div className="error" role="alert">
+          <span>{error || loadError}</span>
           <button
-            onClick={() => {
+            onClick={async () => {
               setError("");
-              setLoadError("");
-              if (auth) refresh();
+              refresh();
             }}
+            aria-label="Dismiss error"
           >
             <X size={16} />
           </button>
         </div>
       )}
-      {ticket && connectName && (
+      {ticket && (
         <div className="connection">
-          <span>
-            Connect <strong>{connectName}</strong> to your AtableZ tables.
-          </span>
+          <span>Use your saved and shared tables in ChatGPT.</span>
           <button
             className="primary"
             onClick={async () => {
-              if (!w || w.expiresAt) {
-                setAccount(true);
-                return;
-              }
-              try {
-                const x = await api("connect", { ticket });
-                location.assign(x.redirect);
-              } catch (e: any) {
-                setError(e.message);
-              }
+              if (!w?.signedIn) setAccount(true);
+              else
+                run(async () => {
+                  const x = await api("connect", { ticket });
+                  location.assign(x.redirect);
+                });
             }}
           >
-            {w && !w.expiresAt ? "Allow connection" : "Sign in to connect"}
+            Connect account
           </button>
+        </div>
+      )}
+      {invite && (
+        <div className="connection">
+          <span>{notice || "You’ve been invited to shared tables."}</span>
+          {!notice && (
+            <button
+              className="primary"
+              onClick={async () => {
+                if (!w?.signedIn) setAccount(true);
+                else
+                  run(async () => {
+                    const x = await api("invitation", { token: invite });
+                    setNotice(x.message);
+                  });
+              }}
+            >
+              Request access
+            </button>
+          )}
         </div>
       )}
       {!w ? (
         <main className="empty">
-          <Table2 size={40} />
-          <h1>
-            {error
-              ? "Start fresh"
-              : "Your custom reusable database."}
-          </h1>
+          <Table2 size={32} />
+          <h1>Your custom reusable database.</h1>
           <p>
             {embedded
-              ? "Ask ChatGPT to save your information as a table in AtableZ."
-              : "Preparing your workspace…"}
+              ? "Ask ChatGPT to save information as a table."
+              : auth
+                ? "Opening your tables…"
+                : "Save something worth coming back to."}
           </p>
-          {!embedded && error && (
-            <button
-              className="primary"
-              onClick={() =>
-                api("guest", {}).then((g) => {
-                  setAuth(g.auth);
-                  setW(g.state);
-                  setError("");
-                })
-              }
-            >
-              Start a new one-hour preview
+          {!embedded && !auth && (
+            <button className="primary" onClick={start}>
+              Start a preview
             </button>
           )}
         </main>
+      ) : page === "settings" ? (
+        <SettingsPage
+          w={w}
+          change={change}
+          onAccount={() => setAccount(true)}
+          onError={setError}
+          onRefresh={() => refresh()}
+          onLogout={() => {
+            setW(null);
+            setSelected(null);
+            start();
+          }}
+        />
       ) : !t ? (
         <main className="home">
-          <div className="eyebrow">YOUR WORKSPACE</div>
-          <div className="home-title">
-            <div>
-              <h1>
-                <Editable value={w.name || "My workspace"} label="Workspace name" className="table-title" onSave={(name) => change({ action: "workspace", name })} />
-              </h1>
-              <p>Your custom reusable database.</p>
-            </div>
-            <div className="home-actions">
-              <button
-                className="subtle"
-                title="Undo last change"
-                disabled={!w.canUndo}
-                onClick={() => change({ action: "undo" }).catch(() => {})}
-              >
-                <Undo2 size={16} />
-              </button>
-              <button
-                className="primary"
-                disabled={expired}
-                onClick={() => create().catch(() => {})}
-              >
+          <div className="page-heading">
+            <h1>Tables</h1>
+            {(!w.role || w.role !== "viewer") && (
+              <button className="primary" onClick={() => run(() => create())}>
                 <Plus size={16} />
                 New table
               </button>
-            </div>
+            )}
           </div>
-          <div className="home-toolbar">
+          {w.tables.length > 3 && (
             <label className="search">
               <Search size={16} />
               <input
-                placeholder="Find a table…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                aria-label="Find a table"
+                placeholder="Find a table"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
               />
             </label>
-            <span className="muted">Recently updated</span>
-          </div>
-          <div className="cards">
-            {[...w.tables]
-              .sort((a, b) => b.updatedAt - a.updatedAt)
-              .filter((t) =>
-                t.name.toLowerCase().includes(search.toLowerCase()),
-              )
-              .map((table) => (
-                <button
-                  className="table-card"
-                  key={table.id}
-                  onClick={() => {
-                    setSelected(table.id);
-                    setQuery("");
-                    setFilter("");
-                    setSort(null);
-                  }}
-                >
-                  <span className="card-icon">
-                    <Table2 size={21} />
-                  </span>
-                  <h2>{table.name}</h2>
-                  <p>
-                    {table.description ||
-                      "Your information, organized your way."}
-                  </p>
-                  <div className="card-footer">
-                    <span>
-                      {table.rows.length} entries · {table.fields.length}{" "}
-                      columns
-                    </span>
+          )}
+          {w.tables.length ? (
+            <div className="cards">
+              {w.tables
+                .filter((t) =>
+                  t.name.toLowerCase().includes(query.toLowerCase()),
+                )
+                .map((table, i) => (
+                  <button
+                    className="table-card"
+                    key={table.id}
+                    onClick={async () => {
+                      setSelected(table.id);
+                      setQuery("");
+                      setSort(null);
+                    }}
+                  >
+                    <div className={"card-icon " + colors[i % colors.length]}>
+                      <Table2 size={21} />
+                    </div>
+                    <div>
+                      <h2>{table.name}</h2>
+                      <p>
+                        {table.rows.length}{" "}
+                        {table.rows.length === 1 ? "row" : "rows"}
+                        {table.permission === "viewer" ? " · Read only" : ""}
+                      </p>
+                    </div>
                     <ArrowUpRight size={16} />
-                  </div>
-                </button>
-              ))}
-          </div>
-          {!w.tables.length && (
-            <section className="welcome">
-              <div className="tiny-grid">
-                <Table2 size={40} />
+                  </button>
+                ))}
+            </div>
+          ) : (
+            <div className="welcome">
+              <div className="welcome-grid">
+                <span />
+                <span />
+                <span />
+                <span />
+                <span />
+                <span />
               </div>
-              <h2>From a conversation to a collection.</h2>
-              <p>
-                Ask ChatGPT to “save this as a table.”
-                <br />
-                Or create your first table here and make it your own.
-              </p>
-              <button
-                className="primary"
-                onClick={() => create().catch(() => {})}
-              >
-                <Plus size={16} />
-                Create a table
-              </button>
+              <h2>A place for what you discover.</h2>
+              <p>Ask ChatGPT to save a table, or start one here.</p>
               <button
                 className="text-button"
-                onClick={() => create(true).catch(() => {})}
+                onClick={() => run(() => create(true))}
               >
-                Explore a sample table <ArrowUpRight size={14} />
+                Explore a sample table <ArrowUpRight size={15} />
               </button>
-              <div className="sample-note">
-                No setup wizard. Just start with what you have.
-              </div>
-            </section>
+            </div>
           )}
         </main>
       ) : (
-        <main className="table-page">
-          <div className="eyebrow">
-            <Table2 size={13} /> TABLE
-          </div>
-          <div className="title-row">
+        <main
+          className={"table-page " + (w.density === "compact" ? "dense" : "")}
+        >
+          <div className="table-heading">
             <Editable
-              value={t.name}
-              label="Table name"
               className="table-title"
+              label="Table name"
+              value={t.name}
+              disabled={readonly}
               onSave={(name) =>
                 change({ action: "metadata", tableId: t.id, name })
               }
             />
-            <button
-              className="subtle"
-              onClick={() => change({ action: "undo" }).catch(() => {})}
-              disabled={!w.canUndo}
-              title="Undo last change"
-            >
-              <Undo2 size={16} />
-            </button>
-          </div>
-          <Editable
-            value={t.description}
-            label="Table description"
-            placeholder="Add a description…"
-            className="description"
-            onSave={(description) =>
-              change({ action: "metadata", tableId: t.id, description })
-            }
-          />
-          <div className="table-toolbar">
-            <span className="view-label">
-              <Table2 size={15} />
-              Table view
-            </span>
-            <span className="row-count">{rows.length} entries</span>
-            <div className="toolbar-right">
-              <label className="search compact">
-                <Search size={15} />
-                <input
-                  placeholder="Search entries…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                />
-              </label>
-              <button
-                className={"subtle " + (filter ? "selected" : "")}
-                onClick={() => setFilter(filter ? "" : "missing")}
-                title="Show entries missing required values"
+            <div className="actions">
+              {readonly && <span className="muted">Read only</span>}
+              {w.role === "owner" && w.signedIn && (
+                <button className="outline" onClick={() => setShare(true)}>
+                  <Share2 size={15} />
+                  Share
+                </button>
+              )}
+              <details
+                className="menu"
+                onClick={(e) => {
+                  if ((e.target as HTMLElement).closest("button"))
+                    e.currentTarget.removeAttribute("open");
+                }}
               >
-                <SlidersHorizontal size={15} />
-                <span>{filter ? "Incomplete" : "Filter"}</span>
-              </button>
-              <button className="subtle" onClick={exportCsv} title="Export CSV">
-                <Download size={15} />
-              </button>
-              <button className="outline" onClick={() => setStructure(true)}>
-                <Columns3 size={15} />
-                Modify table
-              </button>
+                <summary aria-label="Table actions">
+                  <MoreHorizontal size={21} />
+                </summary>
+                <div>
+                  <button
+                    onClick={() => setStructure(true)}
+                    disabled={readonly}
+                  >
+                    <Columns3 size={15} />
+                    Modify table
+                  </button>
+                  <button onClick={() => run(() => exportCsv())}>
+                    <Download size={15} />
+                    Export CSV
+                  </button>
+                  {w.canUndo && (
+                    <button
+                      onClick={() => run(() => change({ action: "undo" }))}
+                    >
+                      <Undo2 size={15} />
+                      Undo last change
+                    </button>
+                  )}
+                </div>
+              </details>
             </div>
           </div>
+          {(t.description || !readonly) && (
+            <Editable
+              className="description"
+              label="Table description"
+              value={t.description}
+              placeholder="Add a description"
+              disabled={readonly}
+              onSave={(description) =>
+                change({ action: "metadata", tableId: t.id, description })
+              }
+            />
+          )}
+          <div className="table-toolbar">
+            <label className="search">
+              <Search size={15} />
+              <input
+                aria-label="Search rows"
+                placeholder="Search rows"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </label>
+            {t.fields.some((f) => f.required) && (
+              <button
+                className={"subtle " + (missing ? "active" : "")}
+                onClick={() => setMissing(!missing)}
+              >
+                Missing values
+              </button>
+            )}
+            <span className="save-status" aria-live="polite">
+              {status}
+            </span>
+          </div>
           <div className="grid-wrap">
-            <table>
+            <table
+              style={{
+                minWidth: t.fields.reduce(
+                  (n, f) => n + (widths[f.id] || 190),
+                  40,
+                ),
+              }}
+            >
               <thead>
                 <tr>
                   {t.fields.map((f) => (
-                    <th key={f.id}>
+                    <th
+                      key={f.id}
+                      style={{
+                        width: widths[f.id] || 190,
+                        minWidth: widths[f.id] || 190,
+                      }}
+                    >
                       <button
                         title={f.description || f.instruction || f.name}
                         onClick={() =>
@@ -625,25 +747,61 @@ function App() {
                           })
                         }
                       >
-                        <span className="type-symbol">
-                          {["integer", "number"].includes(f.type)
-                            ? "#"
-                            : f.type === "boolean"
-                              ? "☑"
-                              : "Aa"}
-                        </span>
                         {f.name}
                         {f.required && <span className="required">*</span>}
                         {sort?.id === f.id && (sort.asc ? " ↑" : " ↓")}
                       </button>
+                      <span
+                        className="resize-handle"
+                        onPointerDown={(e) => {
+                          const start = e.clientX,
+                            initial = widths[f.id] || 190;
+                          e.currentTarget.setPointerCapture(e.pointerId);
+                          const node = e.currentTarget;
+                          const move = (ev: PointerEvent) =>
+                            setWidths((old) => ({
+                              ...old,
+                              [f.id]: Math.max(
+                                110,
+                                initial + ev.clientX - start,
+                              ),
+                            }));
+                          const end = () => {
+                            node.removeEventListener("pointermove", move);
+                            node.removeEventListener("pointerup", end);
+                          };
+                          node.addEventListener("pointermove", move);
+                          node.addEventListener("pointerup", end);
+                        }}
+                      />
                     </th>
                   ))}
                   <th className="end-cell" />
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, i) => (
-                  <tr key={row.id}>
+                {rows.map((row) => (
+                  <tr
+                    key={row.id}
+                    className={
+                      t.colorField
+                        ? "colored-row " +
+                          (() => {
+                            const f = t.fields.find(
+                              (f) => f.id === t.colorField,
+                            );
+                            const v = row.values[t.colorField!];
+                            return (
+                              f?.optionColors?.[v] ||
+                              colors[
+                                Math.max(0, f?.options.indexOf(v) ?? 0) %
+                                  colors.length
+                              ]
+                            );
+                          })()
+                        : ""
+                    }
+                  >
                     {t.fields.map((f) => (
                       <td key={f.id}>
                         <Cell
@@ -674,29 +832,27 @@ function App() {
             </table>
             {!rows.length && (
               <div className="no-rows">
-                {query || filter
-                  ? "No matching entries."
-                  : "Your table is ready. Add an entry or ask ChatGPT to fill it."}
+                {query || missing
+                  ? "No matching rows."
+                  : "Add your first row, or ask ChatGPT to fill this table."}
               </div>
             )}
-            <button
-              className="add-row"
-              disabled={expired}
-              onClick={() =>
-                change({ action: "add", tableId: t.id, rows: [{}] }).catch(
-                  () => {},
-                )
-              }
-            >
-              <Plus size={15} />
-              Add entry
-            </button>
+            {!readonly && (
+              <button
+                className="add-row"
+                onClick={() =>
+                  run(() =>
+                    change({ action: "add", tableId: t.id, rows: [{}] }),
+                  )
+                }
+              >
+                <Plus size={15} />
+                Add row
+              </button>
+            )}
           </div>
           <div className="table-footer">
-            <span>
-              {t.rows.length} entries · {t.fields.length} columns
-            </span>
-            <span>Click any value to edit · Changes save automatically</span>
+            {rows.length} {rows.length === 1 ? "row" : "rows"}
           </div>
         </main>
       )}
@@ -707,81 +863,134 @@ function App() {
           onSave={(op) => change({ ...op, tableId: t.id })}
           onDelete={() =>
             change({ action: "deleteTable", tableId: t.id }).then(() => {
-              setStructure(false);
               setSelected(null);
+              setStructure(false);
             })
           }
         />
       )}
       {detail && t && (
-        <div className="overlay">
-          <section className="modal detail">
-            <div className="modal-heading">
-              <div>
-                <div className="eyebrow">ENTRY DETAILS</div>
-                <h2>
-                  {String(
-                    t.rows.find((r) => r.id === detail)?.values[
-                      t.fields[0].id
-                    ] || "Untitled entry",
-                  )}
-                </h2>
-              </div>
-              <button onClick={() => setDetail(null)}>
-                <X />
-              </button>
+        <Modal title="Row details" onClose={() => setDetail(null)}>
+          {t.fields.map((f) => (
+            <div className="detail-field" key={f.id}>
+              <label>{f.name}</label>
+              {f.description && <small>{f.description}</small>}
+              <Cell
+                field={f}
+                value={t.rows.find((r) => r.id === detail)?.values[f.id]}
+                onSave={(value) =>
+                  change({
+                    action: "patch",
+                    tableId: t.id,
+                    rowId: detail,
+                    values: { [f.id]: value },
+                  })
+                }
+              />
             </div>
-            {t.fields.map((f) => (
-              <label key={f.id} className="detail-field">
-                <span>
-                  {f.name}
-                  {f.required ? " *" : ""}
-                </span>
-                <small>{f.description}</small>
-                <Cell
-                  field={f}
-                  value={t.rows.find((r) => r.id === detail)?.values[f.id]}
-                  onSave={(value) =>
+          ))}
+          {!readonly && (
+            <button
+              className="text-button danger"
+              onClick={async () => {
+                if (await confirmAction("Delete this row?"))
+                  run(() =>
                     change({
-                      action: "patch",
+                      action: "deleteRow",
                       tableId: t.id,
                       rowId: detail,
-                      values: { [f.id]: value },
-                    })
-                  }
-                />
-              </label>
-            ))}
-            <button
-              className="danger text-button"
-              onClick={() => {
-                if (confirm("Delete this entry? You can undo this change."))
-                  change({ action: "deleteRow", tableId: t.id, rowId: detail })
-                    .then(() => setDetail(null))
-                    .catch(() => {});
+                    }).then(() => setDetail(null)),
+                  );
               }}
             >
               <Trash2 size={15} />
-              Delete entry
+              Delete row
             </button>
-          </section>
-        </div>
+          )}
+        </Modal>
       )}
       {account && (
         <Account
-          saved={!!w && !w.expiresAt}
+          initialMode={accountMode}
           onClose={() => setAccount(false)}
-          onDone={() => {
+          onDone={async () => {
             setAccount(false);
-            refresh();
+            const next = await api("workspace");
+            setW(next);
+            ref.current = next;
+            setError("");
+            setLoadError("");
+            list();
           }}
         />
       )}
-      <footer className="app-footer">
-        <span>AtableZ</span>
-        <span>Your custom reusable database.</span>
-      </footer>
-    </>
+      {share && w && (
+        <Modal
+          title={"Share " + (t?.name || "workspace")}
+          onClose={() => setShare(false)}
+        >
+          <SharingPanel tableId={t?.id} tables={w.tables} onError={setError} />
+        </Modal>
+      )}
+    </DataContext.Provider>
+  );
+}
+function Modal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const el = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement;
+    el.current?.focus();
+    const fn = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "Tab") {
+        const nodes = el.current?.querySelectorAll<HTMLElement>(
+          "button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href]",
+        );
+        if (!nodes?.length) return;
+        const first = nodes[0],
+          last = nodes[nodes.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", fn);
+    return () => {
+      document.removeEventListener("keydown", fn);
+      prev?.focus();
+    };
+  }, []);
+  return (
+    <div className="overlay">
+      <section
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        ref={el}
+        tabIndex={-1}
+      >
+        <div className="modal-heading">
+          <h2>{title}</h2>
+          <button aria-label="Close dialog" onClick={onClose}>
+            <X size={20} />
+          </button>
+        </div>
+        <div className="modal-body">{children}</div>
+      </section>
+    </div>
   );
 }
 function Editable({
@@ -790,42 +999,197 @@ function Editable({
   onSave,
   className = "",
   placeholder = "",
+  disabled = false,
 }: {
   value: string;
   label: string;
   onSave: (v: string) => Promise<any>;
   className?: string;
   placeholder?: string;
+  disabled?: boolean;
 }) {
-  const [draft, setDraft] = useState(value);
-  const [err, setErr] = useState("");
-  useEffect(() => setDraft(value), [value]);
+  const [draft, setDraft] = useState(value),
+    [err, setErr] = useState("");
+  const cancel = useRef(false);
+  useEffect(() => {
+    if (!err) setDraft(value);
+  }, [value]);
   return (
     <div className={className}>
       <input
         aria-label={label}
+        readOnly={disabled}
         value={draft}
         placeholder={placeholder}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
           if (e.key === "Escape") {
-            e.preventDefault();
+            cancel.current = true;
             setDraft(value);
+            setErr("");
+            e.currentTarget.blur();
           }
         }}
         onBlur={() => {
+          if (cancel.current) {
+            cancel.current = false;
+            return;
+          }
           if (draft !== value)
             onSave(draft)
               .then(() => setErr(""))
-              .catch((e) => {
-                setErr(e.message);
-                setDraft(value);
-              });
+              .catch((e) => setErr(e.message));
         }}
       />
       {err && <small className="field-error">{err}</small>}
     </div>
+  );
+}
+
+// Host-safe confirmation; window.confirm is unavailable in the ChatGPT sandbox.
+function confirmAction(message: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const previous = document.activeElement as HTMLElement;
+    const overlay = document.createElement("div");
+    overlay.className = "overlay";
+    overlay.style.zIndex = "100";
+    const box = document.createElement("section");
+    box.className = "modal";
+    box.setAttribute("role", "alertdialog");
+    box.setAttribute("aria-modal", "true");
+    box.setAttribute("aria-label", "Confirm change");
+    const heading = document.createElement("div");
+    heading.className = "modal-heading";
+    const title = document.createElement("h2");
+    title.textContent = "Confirm change";
+    heading.append(title);
+    const body = document.createElement("div");
+    body.className = "modal-body";
+    const text = document.createElement("p");
+    text.textContent = message;
+    body.append(text);
+    const actions = document.createElement("div");
+    actions.className = "modal-footer";
+    const cancel = document.createElement("button");
+    cancel.textContent = "Cancel";
+    cancel.className = "outline";
+    const okay = document.createElement("button");
+    okay.textContent = "Confirm";
+    okay.className = "primary";
+    const done = (value: boolean) => {
+      overlay.remove();
+      previous?.focus();
+      resolve(value);
+    };
+    cancel.onclick = () => done(false);
+    okay.onclick = () => done(true);
+    overlay.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        done(false);
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        (document.activeElement === cancel ? okay : cancel).focus();
+      }
+    });
+    actions.append(cancel, okay);
+    box.append(heading, body, actions);
+    overlay.append(box);
+    document.body.append(overlay);
+    cancel.focus();
+  });
+}
+
+async function download(blob: Blob, name: string) {
+  if (bridge) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 8192)
+      binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    const result = await bridge.downloadFile({
+      contents: [
+        {
+          type: "resource",
+          resource: {
+            uri: "file:///" + encodeURIComponent(name),
+            mimeType: blob.type,
+            blob: btoa(binary),
+          },
+        },
+      ],
+    });
+    if (result.isError) throw new Error("Download was cancelled.");
+    return;
+  }
+  const url = URL.createObjectURL(blob),
+    a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+function fileBlob(x: any) {
+  const bytes = Uint8Array.from(atob(x.data), (c) => c.charCodeAt(0));
+  return new Blob([bytes], { type: x.mime });
+}
+function Attachment({ id, image = false }: { id: string; image?: boolean }) {
+  const { w } = useContext(DataContext),
+    info = w?.attachments?.find((a) => a.id === id);
+  const [src, setSrc] = useState(""),
+    [err, setErr] = useState(""),
+    [preview, setPreview] = useState(false);
+  useEffect(() => {
+    let live = true,
+      url = "";
+    if (image)
+      api("attachments/" + id)
+        .then((x) => {
+          url = URL.createObjectURL(fileBlob(x));
+          if (live) setSrc(url);
+        })
+        .catch((e) => {
+          if (live) setErr(e.message);
+        });
+    return () => {
+      live = false;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [id, image]);
+  return (
+    <>
+      <button
+        className={image ? "thumbnail" : "file-link"}
+        title={info?.name || "File"}
+        onClick={async () => {
+          try {
+            if (image && src) setPreview(true);
+            else {
+              const x = await api("attachments/" + id);
+              await download(fileBlob(x), x.name);
+            }
+          } catch (e: any) {
+            setErr(e.message);
+          }
+        }}
+      >
+        {image && src ? (
+          <img src={src} alt={info?.name || "Attachment"} />
+        ) : (
+          <>
+            <Paperclip size={14} />
+            <span>{info?.name || "File"}</span>
+          </>
+        )}
+      </button>
+      {err && <small className="field-error">{err}</small>}
+      {preview && (
+        <Modal title={info?.name || "Image"} onClose={() => setPreview(false)}>
+          <img className="image-preview" src={src} alt={info?.name || ""} />
+        </Modal>
+      )}
+    </>
   );
 }
 function Cell({
@@ -837,85 +1201,942 @@ function Cell({
   value: any;
   onSave: (v: any) => Promise<any>;
 }) {
-  const [draft, setDraft] = useState(value ?? "");
-  const [err, setErr] = useState("");
-  useEffect(() => setDraft(value ?? ""), [value]);
-  async function commit(next: any) {
+  const { w, t, readonly } = useContext(DataContext),
+    locked = readonly || f.fixed;
+  const [draft, setDraft] = useState<any>(value ?? ""),
+    [err, setErr] = useState(""),
+    [uploading, setUploading] = useState(false);
+  const cancel = useRef(false);
+  useEffect(() => {
+    if (!err) setDraft(value ?? "");
+  }, [value]);
+  async function commit(v: any) {
     try {
-      await onSave(next);
+      await onSave(v);
       setErr("");
+      setDraft(v ?? "");
     } catch (e: any) {
       setErr(e.message);
-      setDraft(value ?? "");
     }
   }
-  const label = f.name;
+  async function upload(files: FileList | null) {
+    if (!files || locked || !w || !t) return;
+    setUploading(true);
+    setErr("");
+    try {
+      const ids = [...(value || [])];
+      for (const file of Array.from(files)) {
+        if (file.size > 2 * 1024 * 1024)
+          throw new Error("Files must be 2 MB or smaller");
+        if (ids.length >= 10) throw new Error("Up to 10 files per cell");
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        let binary = "";
+        for (let i = 0; i < bytes.length; i += 8192)
+          binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+        const a = await api("attachments", {
+          workspaceId: w.id,
+          tableId: t.id,
+          name: file.name,
+          data: btoa(binary),
+        });
+        if (f.type === "image" && !a.mime.startsWith("image/"))
+          throw new Error("Choose an image");
+        ids.push(a.id);
+      }
+      await onSave(ids);
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+  const numeric = ["integer", "number", "progress", "rating"].includes(f.type);
+  const input = (
+    <input
+      aria-label={f.name}
+      readOnly={locked}
+      value={draft}
+      type={f.type === "date" ? "date" : "text"}
+      inputMode={numeric ? "decimal" : undefined}
+      className={numeric ? "numeric" : ""}
+      placeholder=""
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") {
+          cancel.current = true;
+          setDraft(value ?? "");
+          setErr("");
+          e.currentTarget.blur();
+        }
+      }}
+      onBlur={() => {
+        if (cancel.current) {
+          cancel.current = false;
+          return;
+        }
+        let v = draft;
+        if (v === "") v = null;
+        else if (numeric) v = Number(v);
+        if (v !== value && !(v === null && value === undefined)) commit(v);
+      }}
+    />
+  );
+  const tint =
+    f.optionColors?.[value] ||
+    colors[Math.max(0, f.options.indexOf(value)) % colors.length];
   return (
-    <div className={"cell " + (f.fixed ? "fixed" : "")}>
+    <div className={"cell " + (locked ? "locked" : "")}>
       {f.type === "boolean" ? (
-        <select
-          aria-label={label}
-          disabled={f.fixed}
-          value={value === null || value === undefined ? "" : String(value)}
-          onChange={(e) =>
-            commit(e.target.value === "" ? null : e.target.value === "true")
-          }
-        >
-          <option value="">—</option>
-          <option value="true">Yes</option>
-          <option value="false">No</option>
-        </select>
+        <div className="check-cell">
+          <input
+            aria-label={f.name}
+            type="checkbox"
+            disabled={locked}
+            checked={value === true}
+            onChange={(e) => commit(e.target.checked)}
+          />
+        </div>
       ) : f.type === "select" ? (
         <select
-          aria-label={label}
-          disabled={f.fixed}
+          aria-label={f.name}
+          disabled={locked}
+          className={value ? "chip " + tint : "blank-choice"}
           value={value ?? ""}
           onChange={(e) => commit(e.target.value || null)}
-          className={value ? "pill-select" : ""}
         >
-          <option value="">Select…</option>
+          <option value=""></option>
           {f.options.map((o) => (
             <option key={o}>{o}</option>
           ))}
         </select>
-      ) : (
-        <input
-          aria-label={label}
-          readOnly={f.fixed}
+      ) : f.type === "multiselect" ? (
+        <details className="multi-choice">
+          <summary aria-label={f.name}>
+            {(value || []).map((v: string) => (
+              <span
+                key={v}
+                className={
+                  "chip " +
+                  (f.optionColors?.[v] ||
+                    colors[Math.max(0, f.options.indexOf(v)) % colors.length])
+                }
+              >
+                {v}
+              </span>
+            ))}
+            {!value?.length && (
+              <span className="muted">{locked ? "—" : "Choose"}</span>
+            )}
+          </summary>
+          <div className="choice-options">
+            {f.options.map((o) => (
+              <label key={o}>
+                <input
+                  type="checkbox"
+                  disabled={locked}
+                  checked={(value || []).includes(o)}
+                  onChange={(e) =>
+                    commit(
+                      e.target.checked
+                        ? [...(value || []), o]
+                        : (value || []).filter((v: string) => v !== o),
+                    )
+                  }
+                />
+                {o}
+              </label>
+            ))}
+          </div>
+        </details>
+      ) : f.type === "progress" ? (
+        <div className="progress-cell">
+          <div
+            className={"progress-track " + (f.color || "blue")}
+            role="progressbar"
+            aria-label={f.name}
+            aria-valuenow={value ?? undefined}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <span
+              style={{ width: Math.min(100, Math.max(0, value || 0)) + "%" }}
+            />
+          </div>
+          {input}
+          <span className="percent">{value != null ? "%" : ""}</span>
+        </div>
+      ) : f.type === "rating" ? (
+        <div className="rating">
+          <span aria-hidden="true">
+            {"★".repeat(Math.min(f.max ?? 5, Math.max(0, value || 0)))}
+            {"☆".repeat(Math.max(0, (f.max ?? 5) - (value || 0)))}
+          </span>
+          {input}
+        </div>
+      ) : ["image", "files"].includes(f.type) ? (
+        <div
+          className="file-cell"
+          onDragOver={(e) => {
+            if (!locked) e.preventDefault();
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            upload(e.dataTransfer.files);
+          }}
+        >
+          {(value || []).map((id: string) => (
+            <div className="file-item" key={id}>
+              <Attachment id={id} image={f.type === "image"} />
+              {!locked && (
+                <button
+                  className="remove-file"
+                  aria-label="Remove attachment"
+                  onClick={() =>
+                    commit((value || []).filter((x: string) => x !== id))
+                  }
+                >
+                  <X size={10} />
+                </button>
+              )}
+            </div>
+          ))}
+          {!locked && (
+            <label className="upload-control" title="Upload file">
+              <Plus size={14} />
+              <input
+                aria-label={"Upload " + f.name}
+                type="file"
+                multiple
+                accept={
+                  f.type === "image"
+                    ? ".png,.jpg,.jpeg,.webp"
+                    : ".png,.jpg,.jpeg,.webp,.pdf,.txt,.csv,.docx,.xlsx"
+                }
+                disabled={uploading}
+                onChange={(e) => {
+                  upload(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          )}
+          {uploading && <small>Uploading…</small>}
+        </div>
+      ) : f.type === "url" ? (
+        <div className="link-cell">
+          {input}
+          {value && /^https?:\/\//i.test(value) && (
+            <button
+              aria-label={"Open " + f.name}
+              title={value}
+              onClick={() =>
+                openExternal(value).catch((e) => setErr(e.message))
+              }
+            >
+              <ArrowUpRight size={14} />
+            </button>
+          )}
+        </div>
+      ) : f.type === "text" ? (
+        <textarea
+          rows={1}
+          aria-label={f.name}
+          readOnly={locked}
           value={draft}
-          type={f.type === "date" ? "date" : "text"}
-          inputMode={
-            ["integer", "number"].includes(f.type) ? "decimal" : undefined
-          }
-          placeholder="—"
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") e.currentTarget.blur();
             if (e.key === "Escape") {
-              e.preventDefault();
+              cancel.current = true;
               setDraft(value ?? "");
+              e.currentTarget.blur();
             }
           }}
           onBlur={() => {
-            let v: any = draft;
-            if (v === "") v = null;
-            else if (["integer", "number"].includes(f.type)) {
-              v = Number(v);
-              if (
-                !Number.isFinite(v) ||
-                (f.type === "integer" && !Number.isSafeInteger(v))
-              ) {
-                setErr("Enter a valid " + f.type);
-                setDraft(value ?? "");
-                return;
-              }
+            if (cancel.current) {
+              cancel.current = false;
+              return;
             }
-            if (v !== value && !(v === null && value === undefined)) commit(v);
+            if (draft !== (value ?? "")) commit(draft || null);
           }}
         />
+      ) : (
+        input
       )}
-      {err && <small className="field-error">{err}</small>}
+      {err && (
+        <small className="field-error">
+          {err}{" "}
+          <button
+            onClick={async () => {
+              setErr("");
+              setDraft(value ?? "");
+            }}
+          >
+            Reset
+          </button>
+        </small>
+      )}
     </div>
+  );
+}
+function SettingsPage({
+  w,
+  change,
+  onAccount,
+  onError,
+  onRefresh,
+  onLogout,
+}: {
+  w: Workspace;
+  change: (v: any) => Promise<any>;
+  onAccount: () => void;
+  onError: (s: string) => void;
+  onRefresh: () => void;
+  onLogout: () => void;
+}) {
+  const [tab, setTab] = useState("workspace"),
+    [account, setAccount] = useState<any>(null),
+    [current, setCurrent] = useState(""),
+    [password, setPassword] = useState(""),
+    [message, setMessage] = useState("");
+  useEffect(() => {
+    if (w.signedIn)
+      api("account")
+        .then(setAccount)
+        .catch((e) => onError(e.message));
+  }, [w.signedIn]);
+  const act = (fn: () => Promise<any>) => fn().catch((e) => onError(e.message));
+  return (
+    <main className="settings-page">
+      <div className="page-heading">
+        <h1>Settings</h1>
+        {embedded && (
+          <button
+            className="text-button"
+            onClick={() => act(() => openExternal(apiBase + "/settings"))}
+          >
+            Open in app <ArrowUpRight size={14} />
+          </button>
+        )}
+      </div>
+      <div className="settings-tabs">
+        {[
+          ["workspace", "Workspace"],
+          ["team", "Team & access"],
+          ["account", "Account"],
+        ].map(([id, title]) => (
+          <button
+            key={id}
+            className={tab === id ? "active" : ""}
+            onClick={async () => {
+              setTab(id);
+              setMessage("");
+            }}
+          >
+            {title}
+          </button>
+        ))}
+      </div>
+      {tab === "workspace" ? (
+        <section className="settings-section">
+          <h2>Workspace</h2>
+          <label className="form-label">
+            Name
+            <Editable
+              value={w.name}
+              label="Workspace settings name"
+              disabled={w.role !== "owner"}
+              onSave={(name) => change({ action: "workspace", name })}
+            />
+          </label>
+          <label className="form-label">
+            Row spacing
+            <select
+              aria-label="Row spacing"
+              value={w.density || "comfortable"}
+              disabled={w.role !== "owner"}
+              onChange={(e) =>
+                act(() =>
+                  change({ action: "workspace", density: e.target.value }),
+                )
+              }
+            >
+              <option value="comfortable">Comfortable</option>
+              <option value="compact">Compact</option>
+            </select>
+          </label>
+          <div className="setting-row">
+            <div>
+              <strong>File storage</strong>
+              <p>
+                {(
+                  (w.attachments || []).reduce((n, a) => n + a.size, 0) /
+                  1048576
+                ).toFixed(1)}{" "}
+                MB used
+                {w.role === "owner" ? ` of ${w.expiresAt ? 5 : 20} MB` : ""}
+              </p>
+            </div>
+            {w.signedIn && w.role === "owner" && (
+              <button
+                className="outline"
+                onClick={() =>
+                  act(async () => {
+                    const x = await api("attachments/cleanup", {});
+                    setMessage(`${x.removed} unused uploads removed.`);
+                    onRefresh();
+                  })
+                }
+              >
+                Remove unused uploads
+              </button>
+            )}
+          </div>
+          {w.signedIn && (
+            <div className="setting-row">
+              <div>
+                <strong>ChatGPT</strong>
+                <p>
+                  {connectedToChat
+                    ? "Your account is connected for this conversation."
+                    : "Connect AtableZ in ChatGPT to use your saved and shared tables."}
+                </p>
+              </div>
+            </div>
+          )}
+          {message && (
+            <p className="success" role="status">
+              {message}
+            </p>
+          )}
+        </section>
+      ) : tab === "team" ? (
+        w.signedIn && w.id === w.homeId ? (
+          <SharingPanel tables={w.tables} onError={onError} />
+        ) : (
+          <section className="settings-section">
+            <p>
+              {w.signedIn
+                ? "Switch to your own workspace to manage your team."
+                : "Create an account to share tables with your team."}
+            </p>
+            {!w.signedIn && (
+              <button className="primary" onClick={onAccount}>
+                Create an account
+              </button>
+            )}
+          </section>
+        )
+      ) : (
+        <section className="settings-section">
+          {!w.signedIn ? (
+            <>
+              <h2>Keep your tables</h2>
+              <p>
+                Create an account to keep your tables and access them in future
+                conversations.
+              </p>
+              <button className="primary" onClick={onAccount}>
+                Create an account
+              </button>
+            </>
+          ) : (
+            <>
+              <h2>{account?.email || "Your account"}</h2>
+              <details className="password-settings">
+                <summary>Change password</summary>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    act(async () => {
+                      await api("account/password", { current, password });
+                      setCurrent("");
+                      setPassword("");
+                      setMessage(
+                        "Password changed. Other sessions have been signed out.",
+                      );
+                    });
+                  }}
+                >
+                  <label className="form-label">
+                    Current password
+                    <input
+                      type="password"
+                      autoComplete="current-password"
+                      value={current}
+                      onChange={(e) => setCurrent(e.target.value)}
+                      required
+                    />
+                  </label>
+                  <label className="form-label">
+                    New password
+                    <input
+                      type="password"
+                      autoComplete="new-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                    />
+                  </label>
+                  <button className="primary">Save password</button>
+                </form>
+              </details>
+              {message && <p className="success">{message}</p>}
+              <button
+                className="text-button"
+                onClick={() =>
+                  act(async () => {
+                    await api("auth/logout", {});
+                    setAuth("");
+                    onLogout();
+                  })
+                }
+              >
+                <LogOut size={15} />
+                Sign out
+              </button>
+            </>
+          )}
+        </section>
+      )}
+    </main>
+  );
+}
+function SharingPanel({
+  tableId,
+  tables,
+  onError,
+}: {
+  tableId?: string;
+  tables: Table[];
+  onError: (s: string) => void;
+}) {
+  const [data, setData] = useState<any>({
+      teams: [],
+      members: [],
+      grants: [],
+      invitations: [],
+    }),
+    [scope, setScope] = useState(tableId || "*"),
+    [role, setRole] = useState("viewer"),
+    [team, setTeam] = useState(""),
+    [name, setName] = useState(""),
+    [link, setLink] = useState(""),
+    [message, setMessage] = useState(""),
+    [busy, setBusy] = useState(false),
+    [localError, setLocalError] = useState("");
+  async function load() {
+    setData(await api("sharing"));
+  }
+  useEffect(() => {
+    load().catch((e) => setLocalError(e.message));
+    const timer = setInterval(() => load().catch(() => {}), 5000);
+    return () => clearInterval(timer);
+  }, []);
+  async function act(body: any) {
+    setBusy(true);
+    setLocalError("");
+    try {
+      const x = await api("sharing", body);
+      await load();
+      return x;
+    } catch (e: any) {
+      setLocalError(e.message);
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+  const scopeName = (id: string) =>
+    id === "*"
+      ? "Entire workspace"
+      : tables.find((t) => t.id === id)?.name || "Deleted table";
+  const roleSelect = (
+    value: string,
+    fn: (s: string) => void,
+    label: string,
+  ) => (
+    <select
+      aria-label={label}
+      value={value}
+      onChange={(e) => fn(e.target.value)}
+    >
+      <option value="viewer">Can view</option>
+      <option value="editor">Can edit</option>
+    </select>
+  );
+  return (
+    <section className="sharing-panel">
+      <h2>Share access</h2>
+      <div className="share-controls">
+        <label className="form-label">
+          What to share
+          <select
+            aria-label="Share scope"
+            value={scope}
+            onChange={(e) => {
+              setScope(e.target.value);
+              setLink("");
+            }}
+          >
+            <option value="*">Entire workspace</option>
+            {tables.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="form-label">
+          Access{roleSelect(role, setRole, "Invitation permission")}
+        </label>
+      </div>
+      <div className="share-controls">
+        <label className="form-label">
+          Who
+          <select
+            aria-label="Share with"
+            value={team}
+            onChange={(e) => setTeam(e.target.value)}
+          >
+            <option value="">Invite a person</option>
+            {data.teams.map((t: any) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className="primary"
+          disabled={busy}
+          onClick={async () => {
+            if (team) {
+              const x = await act({
+                action: "grantTeam",
+                teamId: team,
+                tableId: scope,
+                role,
+              });
+              if (x) setMessage("Team access saved.");
+            } else {
+              const x = await act({ action: "invite", tableId: scope, role });
+              if (x) setLink(x.url);
+            }
+          }}
+        >
+          {team ? "Give team access" : "Create invite link"}
+        </button>
+      </div>
+      {!team && (
+        <p className="help">
+          Send the link to your teammate. After they sign in and request access,
+          approve their account below.
+        </p>
+      )}
+      {link && (
+        <div className="invite-link">
+          <input
+            aria-label="Invite link"
+            value={link}
+            readOnly
+            onFocus={(e) => e.target.select()}
+          />
+          <button
+            className="outline"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(link);
+                setMessage("Link copied.");
+              } catch {
+                (
+                  document.querySelector(
+                    'input[aria-label="Invite link"]',
+                  ) as HTMLInputElement
+                )?.select();
+                setMessage("Select the link and copy it.");
+              }
+            }}
+          >
+            Copy link
+          </button>
+        </div>
+      )}
+      {message && (
+        <p className="success" role="status">
+          {message}
+        </p>
+      )}
+      {localError && (
+        <p className="error" role="alert">
+          {localError}
+        </p>
+      )}
+      {!!data.invitations.length && (
+        <>
+          <h3>Invitations</h3>
+          {data.invitations.map((i: any) => (
+            <div className="access-row" key={i.id}>
+              <div>
+                <strong>
+                  {i.status === "requested" ? i.email : "Waiting for a request"}
+                </strong>
+                <small>
+                  {i.team_id
+                    ? data.teams.find((t: any) => t.id === i.team_id)?.name
+                    : scopeName(i.table_id)}{" "}
+                  ·{" "}
+                  {i.team_id
+                    ? "Team member"
+                    : i.role === "editor"
+                      ? "Can edit"
+                      : "Can view"}
+                </small>
+                {i.status === "requested" && (
+                  <small>
+                    Account {i.applicant.slice(0, 8)} · Confirm this is your
+                    teammate.
+                  </small>
+                )}
+              </div>
+              {i.status === "requested" && (
+                <button
+                  className="outline"
+                  disabled={busy}
+                  onClick={async () => {
+                    if (
+                      await confirmAction(
+                        `Give access to ${i.email} (account ${i.applicant.slice(0, 8)})? Confirm this account with your teammate before approving.`,
+                      )
+                    )
+                      act({ action: "approve", id: i.id });
+                  }}
+                >
+                  Approve
+                </button>
+              )}
+              <button
+                className="subtle"
+                disabled={busy}
+                onClick={() => act({ action: "cancel", id: i.id })}
+              >
+                Cancel
+              </button>
+            </div>
+          ))}
+        </>
+      )}
+      {!!data.grants.length && (
+        <>
+          <h3>People with access</h3>
+          {data.grants.map((g: any) => (
+            <div className="access-row" key={g.id}>
+              <div>
+                <strong>{g.email || g.team_name || "Team"}</strong>
+                <small>
+                  {scopeName(g.table_id)}
+                  {g.subject_type === "team"
+                    ? " · Inherited by team members"
+                    : ""}
+                </small>
+              </div>
+              {roleSelect(
+                g.role,
+                (r) => act({ action: "role", id: g.id, role: r }),
+                "Access for " + (g.email || g.team_name),
+              )}
+              <button
+                className="subtle danger"
+                disabled={busy}
+                onClick={() => act({ action: "revoke", id: g.id })}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+        </>
+      )}
+      <h3>Teams</h3>
+      <form
+        className="inline-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          act({ action: "team", name }).then((x) => {
+            if (x) setName("");
+          });
+        }}
+      >
+        <input
+          aria-label="Team name"
+          placeholder="Team name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+          maxLength={80}
+        />
+        <button className="outline" disabled={busy}>
+          Create team
+        </button>
+      </form>
+      {data.teams.map((t: any) => (
+        <div className="team-card" key={t.id}>
+          <div className="access-row">
+            <Editable
+              value={t.name}
+              label="Rename team"
+              onSave={async (name) => {
+                const x = await act({ action: "team", id: t.id, name });
+                if (!x) throw new Error("Could not rename team");
+              }}
+            />
+            <button
+              className="outline"
+              disabled={busy}
+              onClick={async () => {
+                const x = await act({
+                  action: "invite",
+                  teamId: t.id,
+                  role: "viewer",
+                });
+                if (x) setLink(x.url);
+              }}
+            >
+              <Plus size={14} />
+              Invite member
+            </button>
+            <button
+              className="subtle danger"
+              title="Delete team"
+              onClick={async () => {
+                if (
+                  await confirmAction("Delete this team and its shared access?")
+                )
+                  act({ action: "deleteTeam", id: t.id });
+              }}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+          {data.members
+            .filter((m: any) => m.team_id === t.id)
+            .map((m: any) => (
+              <div className="access-row" key={m.id}>
+                <span>{m.email}</span>
+                <button
+                  className="subtle"
+                  onClick={() =>
+                    act({ action: "removeMember", teamId: t.id, userId: m.id })
+                  }
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          {!data.members.some((m: any) => m.team_id === t.id) && (
+            <small className="muted">No members yet.</small>
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}
+function Account({
+  initialMode,
+  onClose,
+  onDone,
+}: {
+  initialMode: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [mode, setMode] = useState(initialMode),
+    [email, setEmail] = useState(""),
+    [password, setPassword] = useState(""),
+    [show, setShow] = useState(false),
+    [error, setError] = useState(""),
+    [busy, setBusy] = useState(false);
+  return (
+    <Modal
+      title={mode === "signup" ? "Keep your tables" : "Welcome back"}
+      onClose={onClose}
+    >
+      <p className="account-copy">
+        {mode === "signup"
+          ? "Save your tables and use them in any conversation."
+          : "Sign in to access your saved and shared tables."}
+      </p>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setBusy(true);
+          setError("");
+          try {
+            const x = await api("auth/" + mode, { email, password });
+            setAuth(x.auth);
+            onDone();
+          } catch (e: any) {
+            setError(e.message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <label className="form-label">
+          Email
+          <input
+            name="email"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+        </label>
+        <label className="form-label">
+          Password
+          <div className="password-input">
+            <input
+              aria-label="Password"
+              name="password"
+              type={show ? "text" : "password"}
+              autoComplete={
+                mode === "signup" ? "new-password" : "current-password"
+              }
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              maxLength={128}
+            />
+            <button type="button" onClick={() => setShow(!show)}>
+              {show ? "Hide" : "Show"}
+            </button>
+          </div>
+        </label>
+        {error && (
+          <p className="field-error" role="alert">
+            {error}
+          </p>
+        )}
+        <button className="primary full" disabled={busy}>
+          {busy
+            ? "Please wait…"
+            : mode === "signup"
+              ? "Create account"
+              : "Sign in"}
+        </button>
+      </form>
+      <button
+        className="text-button full"
+        onClick={async () => {
+          setMode(mode === "signup" ? "login" : "signup");
+          setError("");
+        }}
+      >
+        {mode === "signup"
+          ? "Already have an account? Sign in"
+          : "New here? Create an account"}
+      </button>
+    </Modal>
   );
 }
 function Structure({
@@ -929,14 +2150,17 @@ function Structure({
   onSave: (op: any) => Promise<any>;
   onDelete: () => Promise<any>;
 }) {
+  const { w } = useContext(DataContext);
   const [fields, setFields] = useState(structuredClone(table.fields));
   const [instructions, setInstructions] = useState(table.instructions);
+  const [colorField, setColorField] = useState(table.colorField || "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState("columns");
   const changed =
     JSON.stringify(fields) !== JSON.stringify(table.fields) ||
-    instructions !== table.instructions;
+    instructions !== table.instructions ||
+    colorField !== (table.colorField || "");
   const removed = table.fields.filter(
     (f) => !fields.some((n) => n.id === f.id),
   );
@@ -954,16 +2178,17 @@ function Structure({
   function edit(id: string, patch: Partial<Column>) {
     setFields((fs) => fs.map((f) => (f.id === id ? { ...f, ...patch } : f)));
   }
-  function close() {
-    if (!changed || confirm("Discard unsaved structure changes?")) onClose();
+  async function close() {
+    if (!changed || (await confirmAction("Discard unsaved structure changes?")))
+      onClose();
   }
   async function save() {
     if (
       destructive &&
       table.rows.length &&
-      !confirm(
+      !(await confirmAction(
         `This change affects ${table.rows.length} entries.${removed.length ? " Removed columns: " + removed.map((f) => f.name).join(", ") + "." : ""} Review this before continuing. You can undo the change.`,
-      )
+      ))
     )
       return;
     setSaving(true);
@@ -973,6 +2198,7 @@ function Structure({
         fields,
         instructions,
         confirmRemoval: destructive,
+        colorField,
       });
       onClose();
     } catch (e: any) {
@@ -986,9 +2212,7 @@ function Structure({
       <section className="modal structure">
         <div className="modal-heading">
           <div>
-            <div className="eyebrow">MAKE IT YOURS</div>
             <h2>Modify table</h2>
-            <p>Set the structure once. Keep using it.</p>
           </div>
           <button aria-label="Close structure" onClick={close}>
             <X />
@@ -1030,8 +2254,26 @@ function Structure({
           ) : (
             <>
               <p className="help">
-                Rename, reorder, or remove any column. For numbering, add an Integer column; its name and values are yours to edit.
+                Rename, reorder, or remove any column. For numbering, add an
+                Integer column; its name and values are yours to edit.
               </p>
+              <label className="form-label">
+                Row colour
+                <select
+                  aria-label="Row colour"
+                  value={colorField}
+                  onChange={(e) => setColorField(e.target.value)}
+                >
+                  <option value="">None</option>
+                  {fields
+                    .filter((f) => f.type === "select")
+                    .map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
               {fields.map((f, i) => (
                 <section className="column-card" key={f.id}>
                   <div className="column-number">
@@ -1067,28 +2309,48 @@ function Structure({
                             "boolean",
                             "select",
                             "url",
+                            "multiselect",
+                            "progress",
+                            "rating",
+                            "image",
+                            "files",
                           ].map((x) => (
                             <option key={x} value={x}>
-                              {
-                                (
-                                  {
-                                    string: "String · short text",
-                                    text: "Text · long text",
-                                    integer: "Integer · whole number",
-                                    number: "Number · decimal",
-                                    date: "Date",
-                                    boolean: "Boolean · yes/no",
-                                    select: "Select · choices",
-                                    url: "URL · link",
-                                  } as any
-                                )[x]
-                              }
+                              {typeNames[x]}
                             </option>
                           ))}
                         </select>
                       </label>
-                      <button type="button" className="subtle" aria-label={`Move column ${i + 1} left`} disabled={i === 0} onClick={() => setFields((fs) => { const next = [...fs]; [next[i-1], next[i]] = [next[i], next[i-1]]; return next; })}>←</button>
-                      <button type="button" className="subtle" aria-label={`Move column ${i + 1} right`} disabled={i === fields.length - 1} onClick={() => setFields((fs) => { const next = [...fs]; [next[i], next[i+1]] = [next[i+1], next[i]]; return next; })}>→</button>
+                      <button
+                        type="button"
+                        className="subtle"
+                        aria-label={`Move column ${i + 1} left`}
+                        disabled={i === 0}
+                        onClick={() =>
+                          setFields((fs) => {
+                            const next = [...fs];
+                            [next[i - 1], next[i]] = [next[i], next[i - 1]];
+                            return next;
+                          })
+                        }
+                      >
+                        ←
+                      </button>
+                      <button
+                        type="button"
+                        className="subtle"
+                        aria-label={`Move column ${i + 1} right`}
+                        disabled={i === fields.length - 1}
+                        onClick={() =>
+                          setFields((fs) => {
+                            const next = [...fs];
+                            [next[i], next[i + 1]] = [next[i + 1], next[i]];
+                            return next;
+                          })
+                        }
+                      >
+                        →
+                      </button>
                       <button
                         className="remove-column"
                         title="Remove column"
@@ -1123,13 +2385,70 @@ function Structure({
                         placeholder="Describe how ChatGPT should fill this column…"
                       />
                     </label>
-                    {f.type === "select" && (
+                    {["select", "multiselect"].includes(f.type) && (
                       <label className="form-label">
                         Choices (one per line)
                         <textarea
                           value={f.options.join("\n")}
                           onChange={(e) =>
                             edit(f.id, { options: e.target.value.split("\n") })
+                          }
+                        />
+                      </label>
+                    )}
+                    {["select", "multiselect"].includes(f.type) && (
+                      <div className="option-colors">
+                        {f.options.filter(Boolean).map((o, index) => (
+                          <label key={index}>
+                            {o}
+                            <select
+                              aria-label={o + " colour"}
+                              value={
+                                f.optionColors?.[o] ||
+                                colors[index % colors.length]
+                              }
+                              onChange={(e) =>
+                                edit(f.id, {
+                                  optionColors: {
+                                    ...f.optionColors,
+                                    [o]: e.target.value as any,
+                                  },
+                                })
+                              }
+                            >
+                              {colors.map((c) => (
+                                <option key={c}>{c}</option>
+                              ))}
+                            </select>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    {f.type === "progress" && (
+                      <label className="form-label">
+                        Bar colour
+                        <select
+                          value={f.color || "blue"}
+                          onChange={(e) =>
+                            edit(f.id, { color: e.target.value as any })
+                          }
+                        >
+                          {colors.map((c) => (
+                            <option key={c}>{c}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    {f.type === "rating" && (
+                      <label className="form-label">
+                        Maximum rating
+                        <input
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={f.max ?? 5}
+                          onChange={(e) =>
+                            edit(f.id, { max: Number(e.target.value) })
                           }
                         />
                       </label>
@@ -1172,18 +2491,36 @@ function Structure({
                       <label className="form-label">
                         Value for every entry
                         <input
-                          value={f.fixedValue ?? ""}
+                          value={
+                            Array.isArray(f.fixedValue)
+                              ? f.fixedValue.join(", ")
+                              : (f.fixedValue ?? "")
+                          }
                           onChange={(e) => {
                             const v = e.target.value;
                             edit(f.id, {
                               fixedValue:
                                 v === ""
                                   ? null
-                                  : ["integer", "number"].includes(f.type)
+                                  : [
+                                        "integer",
+                                        "number",
+                                        "progress",
+                                        "rating",
+                                      ].includes(f.type)
                                     ? Number(v)
                                     : f.type === "boolean"
                                       ? v === "true"
-                                      : v,
+                                      : [
+                                            "image",
+                                            "files",
+                                            "multiselect",
+                                          ].includes(f.type)
+                                        ? v
+                                            .split(",")
+                                            .map((x) => x.trim())
+                                            .filter(Boolean)
+                                        : v,
                             });
                           }}
                           placeholder={
@@ -1215,9 +2552,10 @@ function Structure({
         <div className="modal-footer">
           <button
             className="text-button danger"
-            onClick={() => {
+            disabled={w?.role !== "owner"}
+            onClick={async () => {
               if (
-                confirm(
+                await confirmAction(
                   "Delete this table and all its entries? You can undo it from another table.",
                 )
               )
@@ -1244,134 +2582,5 @@ function Structure({
     </div>
   );
 }
-function Account({
-  saved,
-  onClose,
-  onDone,
-}: {
-  saved: boolean;
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const [mode, setMode] = useState("signup");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-  return (
-    <div className="overlay">
-      <section className="modal account">
-        <div className="modal-heading">
-          <div>
-            <div className="eyebrow">YOUR WORKSPACE</div>
-            <h2>
-              {saved
-                ? "Your tables are saved"
-                : mode === "signup"
-                  ? "Keep what you’ve created."
-                  : "Welcome back."}
-            </h2>
-          </div>
-          <button onClick={onClose}>
-            <X />
-          </button>
-        </div>
-        {saved ? (
-          <>
-            <p>
-              Your tables are stored in your account. Connect AtableZ in ChatGPT
-              to retrieve them in another conversation.
-            </p>
-            <button
-              className="outline"
-              onClick={async () => {
-                await api("auth/logout", {});
-                setAuth("");
-                location.reload();
-              }}
-            >
-              <LogOut size={15} />
-              Sign out
-            </button>
-          </>
-        ) : (
-          <>
-            <p>
-              {mode === "signup"
-                ? "Create a free account to keep your tables after the one-hour preview. Everything you have created will stay with you."
-                : "Log in to access your tables. Your current preview will be added to your account."}
-            </p>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                setBusy(true);
-                setErr("");
-                try {
-                  const x = await api(`auth/${mode}`, { email, password });
-                  setAuth(x.auth);
-                  onDone();
-                } catch (e: any) {
-                  setErr(e.message);
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              <label className="form-label">
-                Email
-                <input
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </label>
-              <label className="form-label">
-                Password
-                <input
-                  type="password"
-                  autoComplete={
-                    mode === "signup" ? "new-password" : "current-password"
-                  }
-                  minLength={mode === "signup" ? 12 : 1}
-                  maxLength={128}
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </label>
-              {mode === "signup" && (
-                <small className="help">
-                  Use at least 12 characters. Account recovery is not yet
-                  available in this private beta.
-                </small>
-              )}
-              {err && (
-                <div role="alert" className="error">
-                  {err}
-                </div>
-              )}
-              <button className="primary full" disabled={busy}>
-                {busy
-                  ? "Please wait…"
-                  : mode === "signup"
-                    ? "Create account & keep my tables"
-                    : "Log in"}
-              </button>
-            </form>
-            <button
-              className="text-button"
-              onClick={() => setMode(mode === "signup" ? "login" : "signup")}
-            >
-              {mode === "signup"
-                ? "Already have an account? Log in"
-                : "New to AtableZ? Create an account"}
-            </button>
-          </>
-        )}
-      </section>
-    </div>
-  );
-}
+
 createRoot(document.getElementById("root")!).render(<App />);

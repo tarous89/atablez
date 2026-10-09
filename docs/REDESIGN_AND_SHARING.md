@@ -1,7 +1,22 @@
 # AtableZ — shared workspace and visual redesign scope
 
 Date: 2026-10-09
-Status: scoped for implementation; none of the features below should be described as shipped solely because this document exists.
+Status: implemented and locally verified on 2026-10-09; deployment status recorded in PROJECT.md.
+
+## Implementation decisions and differences from the original scope
+
+- Shared website/extension interface, Settings, rich cells, protected uploads, teams and Viewer/Editor grants are implemented.
+- Invites use a copyable, expiring, single-use link. A signed-in recipient requests access; the owner explicitly approves the account ID shown alongside its email. No automatic email-address trust or email delivery is used. Verification emails and forgotten-password recovery remain unconfigured; signed-in password change is available. The owner-approval workflow replaces email-bound automatic acceptance for this beta.
+- Existing tokens stay bound to their original personal home workspace. A unique users(workspace_id) index makes that a stable principal; shared target IDs are separate and authorized on every request. MCP always mints UI credentials for the calling principal, never the shared owner. This preserves existing sessions without a destructive credential migration.
+- Whole-workspace undo remains owner-only; editors cannot use it. Scoped recipients never receive history or unrelated table/file metadata.
+- Choice values preserve existing labels for backward compatibility rather than migrating them to new option IDs in this release. Invalid conversions are rejected without clearing records.
+- Row spacing, optional choice-driven row colours and per-choice/bar colours are implemented. Header emoji remain ordinary editable text.
+- Upload limits: 2 MB/file, 10 files/cell, 5 MB/guest workspace, 20 MB/saved workspace, 100 MB globally. Files persist in a separate Postgres bytea table; unused files can be removed from Settings, respecting undo references.
+- Live collaborative updates use the existing five-second refresh with focus-aware editing, not presence/cursor streaming.
+- Host integration uses versioned workspace-v2 resource plus a legacy URI alias, in-app confirmations, host-mediated downloads/open links, and authenticated blob thumbnails. Local sandbox-host tests cover these paths; an exact new-version replay in ChatGPT is still a separate release check.
+- All eleven server integration tests pass. Browser checks cover desktop/narrow layout, inline edits, progress, schema changes, signup claim, Settings deep links, team creation and image uploads. A sandboxed MCP host test covers hydration, image CSP, confirmations, CSV download and opening app Settings.
+
+The sections below retain the agreed target specification. Where the target describes email-bound invitations, user-ID credential migration or per-table undo, the implementation decisions above govern this beta.
 Applies to: the hosted app and the existing ChatGPT extension, together.
 Product name: AtableZ. Onboarding promise: “Your custom reusable database.”
 
@@ -182,7 +197,7 @@ MCP tools:
 
 ## 9. Delivery sequence and acceptance gates
 
-All steps are scoped / not implemented in this document:
+Original delivery sequence (implemented with the beta decisions above):
 1. Shared visual system, cleaner wording, signup-copy cleanup and Settings routing.
 2. Rich table types, typed cell renderers and schema-conversion validation.
 3. Actor-based authentication migration, verification/recovery, teams, grants and invitations.
@@ -217,3 +232,4 @@ Kanban/calendar/gallery views, formulas, linked-table relations, comments, full 
 - Airtable number fields: https://support.airtable.com/articles/9701435990-number-based-fields-in-airtable
 
 References inform interaction and visual decisions; the concrete scope, palette, limits and permission model above are AtableZ decisions.
+

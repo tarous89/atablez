@@ -273,31 +273,504 @@ test("MCP advertises app and creates guest table without exposing browser creden
 });
 
 test("sandbox subdomain preflight allows bearer requests but rejects lookalike origins", async () => {
-  for (const origin of ["https://atablez-test.web-sandbox.oaiusercontent.com", "https://web-sandbox.oaiusercontent.com"]) {
-    const r = await fetch(base + "/api/workspace", {method:"OPTIONS", headers:{Origin:origin,"Access-Control-Request-Headers":"authorization,content-type"}});
-    assert.equal(r.headers.get("access-control-allow-origin"),origin);
+  for (const origin of [
+    "https://atablez-test.web-sandbox.oaiusercontent.com",
+    "https://web-sandbox.oaiusercontent.com",
+  ]) {
+    const r = await fetch(base + "/api/workspace", {
+      method: "OPTIONS",
+      headers: {
+        Origin: origin,
+        "Access-Control-Request-Headers": "authorization,content-type",
+      },
+    });
+    assert.equal(r.headers.get("access-control-allow-origin"), origin);
   }
-  for (const origin of ["https://evil.example", "https://atablez.web-sandbox.oaiusercontent.com.evil.example", "http://atablez.web-sandbox.oaiusercontent.com"]) {
-    const r = await fetch(base + "/api/guest", {method:"POST", headers:{Origin:origin,"Content-Type":"application/json"},body:"{}"});
-    assert.equal(r.status,403);
-    assert.equal(r.headers.get("access-control-allow-origin"),null);
+  for (const origin of [
+    "https://evil.example",
+    "https://atablez.web-sandbox.oaiusercontent.com.evil.example",
+    "http://atablez.web-sandbox.oaiusercontent.com",
+  ]) {
+    const r = await fetch(base + "/api/guest", {
+      method: "POST",
+      headers: { Origin: origin, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(r.status, 403);
+    assert.equal(r.headers.get("access-control-allow-origin"), null);
   }
 });
 
 test("workspace rename is persistent and undoable; numbering remains an editable field", async () => {
   const g = await preview();
   let w = await create(g);
-  w = (await call('/api/change', {action:'workspace', name:'Research workspace', revision:w.revision, requestId:randomUUID()}, g.auth)).data;
-  assert.equal((await call('/api/workspace',undefined,g.auth)).data.name,'Research workspace');
-  assert.equal(w.tables[0].rows[0].values.score,4);
-  w = (await call('/api/change',{action:'undo',revision:w.revision,requestId:randomUUID()},g.auth)).data;
-  assert.equal(w.name,'My workspace');
-  const fields = [{id:'position',name:'Number',type:'integer'},{id:'company',name:'Company',type:'string'}];
-  w = (await call('/api/change',{action:'create',name:'Numbered table',fields,rows:[{position:10,company:'Example'}],revision:w.revision,requestId:randomUUID()},g.auth)).data;
-  const t=w.tables[1];
-  w = (await call('/api/change',{action:'patch',tableId:t.id,rowId:t.rows[0].id,values:{position:25},revision:w.revision,requestId:randomUUID()},g.auth)).data;
-  assert.equal(w.tables[1].rows[0].values.position,25);
-  w = (await call('/api/change',{action:'structure',tableId:t.id,fields:[fields[1]],confirmRemoval:true,revision:w.revision,requestId:randomUUID()},g.auth)).data;
-  assert.equal(w.tables[1].fields.length,1);
-  assert.equal(w.tables[1].rows[0].values.company,'Example');
+  w = (
+    await call(
+      "/api/change",
+      {
+        action: "workspace",
+        name: "Research workspace",
+        revision: w.revision,
+        requestId: randomUUID(),
+      },
+      g.auth,
+    )
+  ).data;
+  assert.equal(
+    (await call("/api/workspace", undefined, g.auth)).data.name,
+    "Research workspace",
+  );
+  assert.equal(w.tables[0].rows[0].values.score, 4);
+  w = (
+    await call(
+      "/api/change",
+      { action: "undo", revision: w.revision, requestId: randomUUID() },
+      g.auth,
+    )
+  ).data;
+  assert.equal(w.name, "My workspace");
+  const fields = [
+    { id: "position", name: "Number", type: "integer" },
+    { id: "company", name: "Company", type: "string" },
+  ];
+  w = (
+    await call(
+      "/api/change",
+      {
+        action: "create",
+        name: "Numbered table",
+        fields,
+        rows: [{ position: 10, company: "Example" }],
+        revision: w.revision,
+        requestId: randomUUID(),
+      },
+      g.auth,
+    )
+  ).data;
+  const t = w.tables[1];
+  w = (
+    await call(
+      "/api/change",
+      {
+        action: "patch",
+        tableId: t.id,
+        rowId: t.rows[0].id,
+        values: { position: 25 },
+        revision: w.revision,
+        requestId: randomUUID(),
+      },
+      g.auth,
+    )
+  ).data;
+  assert.equal(w.tables[1].rows[0].values.position, 25);
+  w = (
+    await call(
+      "/api/change",
+      {
+        action: "structure",
+        tableId: t.id,
+        fields: [fields[1]],
+        confirmRemoval: true,
+        revision: w.revision,
+        requestId: randomUUID(),
+      },
+      g.auth,
+    )
+  ).data;
+  assert.equal(w.tables[1].fields.length, 1);
+  assert.equal(w.tables[1].rows[0].values.company, "Example");
+});
+
+async function account(prefix: string) {
+  const g = await preview();
+  const result = await call(
+    "/api/auth/signup",
+    {
+      email: `${prefix}-${randomUUID()}@example.test`,
+      password: "testing-strong-password",
+    },
+    g.auth,
+  );
+  assert.equal(result.status, 200);
+  return {
+    auth: result.data.auth,
+    state: (await call("/api/workspace", undefined, result.data.auth)).data,
+  };
+}
+async function share(
+  owner: any,
+  recipient: any,
+  tableId: string,
+  role = "viewer",
+  teamId?: string,
+) {
+  const invite = await call(
+    "/api/sharing",
+    { action: "invite", tableId, role, teamId },
+    owner.auth,
+  );
+  assert.equal(invite.status, 200);
+  const token = new URL(invite.data.url).searchParams.get("invite");
+  assert.equal(
+    (await call("/api/invitation", { token }, recipient.auth)).status,
+    200,
+  );
+  const pending = (
+    await call("/api/sharing", undefined, owner.auth)
+  ).data.invitations.find((x: any) => x.status === "requested");
+  assert.ok(pending);
+  assert.equal(
+    (
+      await call(
+        "/api/sharing",
+        { action: "approve", id: pending.id },
+        owner.auth,
+      )
+    ).status,
+    200,
+  );
+  assert.equal(
+    (await call("/api/invitation", { token }, recipient.auth)).status,
+    410,
+  );
+}
+async function mcp(auth: string, name: string, args: any) {
+  const r = await fetch(base + "/mcp", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      Authorization: "Bearer " + auth,
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name, arguments: args },
+    }),
+  });
+  return (await r.json()).result;
+}
+test("shared table ACLs apply to REST, MCP, hydration, minted UI tokens and revocation", async () => {
+  const owner = await account("owner"),
+    member = await account("member"),
+    stranger = await account("stranger");
+  let w = await create(owner);
+  const shared = w.tables[0];
+  w = (
+    await call(
+      "/api/change",
+      {
+        action: "create",
+        name: "PRIVATE SECRET",
+        fields,
+        rows: [{ name: "Never disclose", score: 9 }],
+        revision: w.revision,
+        requestId: randomUUID(),
+      },
+      owner.auth,
+    )
+  ).data;
+  const accessToken = await instance.s.credential(
+    instance.s.query,
+    member.state.id,
+    "access",
+    3600000,
+    "test-client",
+  );
+  await share(owner, member, shared.id);
+  const listed = (await call("/api/workspaces", undefined, member.auth)).data;
+  assert.equal(
+    listed.find((x: any) => x.id === owner.state.id).tables.length,
+    1,
+  );
+  let visible = (
+    await call(
+      "/api/workspace?workspaceId=" + owner.state.id,
+      undefined,
+      member.auth,
+    )
+  ).data;
+  assert.equal(visible.tables.length, 1);
+  assert.equal(visible.canUndo, false);
+  assert.equal(JSON.stringify(visible).includes("PRIVATE SECRET"), false);
+  assert.equal(
+    (
+      await call(
+        "/api/workspace?workspaceId=" + owner.state.id,
+        undefined,
+        stranger.auth,
+      )
+    ).status,
+    404,
+  );
+  const op = {
+    workspaceId: owner.state.id,
+    tableId: shared.id,
+    rowId: shared.rows[0].id,
+    action: "patch",
+    values: { score: 7 },
+    revision: visible.revision,
+    requestId: randomUUID(),
+  };
+  assert.equal((await call("/api/change", op, member.auth)).status, 403);
+  assert.equal(
+    (await call("/api/change", { ...op, action: "undo" }, member.auth)).status,
+    403,
+  );
+  const read = await mcp(accessToken, "read_tables", {
+    workspaceId: owner.state.id,
+  });
+  assert.equal(read.structuredContent.tables.length, 1);
+  assert.equal(JSON.stringify(read).includes("PRIVATE SECRET"), false);
+  assert.equal((await mcp(accessToken, "change_table", op)).isError, true);
+  const panel = await mcp(accessToken, "open_workspace", {
+    workspaceId: owner.state.id,
+    tableId: shared.id,
+  });
+  assert.equal(panel._meta.state.tables.length, 1);
+  assert.equal(JSON.stringify(panel).includes("PRIVATE SECRET"), false);
+  assert.equal((await call("/api/change", op, panel._meta.auth)).status, 403);
+  let grants = (await call("/api/sharing", undefined, owner.auth)).data.grants;
+  assert.equal(
+    (
+      await call(
+        "/api/sharing",
+        { action: "role", id: grants[0].id, role: "editor" },
+        owner.auth,
+      )
+    ).status,
+    200,
+  );
+  const saved = await mcp(accessToken, "change_table", {
+    ...op,
+    requestId: randomUUID(),
+  });
+  assert.equal(saved.isError, undefined);
+  assert.equal(saved._meta.state.tables[0].rows[0].values.score, 7);
+  assert.equal(saved._meta.state.tables.length, 1);
+  assert.equal(
+    (
+      await call(
+        "/api/change",
+        { ...op, action: "deleteTable", revision: saved._meta.state.revision },
+        member.auth,
+      )
+    ).status,
+    403,
+  );
+  await call(
+    "/api/sharing",
+    { action: "revoke", id: grants[0].id },
+    owner.auth,
+  );
+  assert.equal(
+    (
+      await call(
+        "/api/workspace?workspaceId=" + owner.state.id,
+        undefined,
+        panel._meta.auth,
+      )
+    ).status,
+    404,
+  );
+  assert.equal(
+    (await mcp(accessToken, "read_tables", { workspaceId: owner.state.id }))
+      .isError,
+    true,
+  );
+});
+test("team membership and inherited workspace grants work without copying records", async () => {
+  const owner = await account("team-owner"),
+    member = await account("team-member");
+  await create(owner);
+  await call("/api/sharing", { action: "team", name: "Research" }, owner.auth);
+  let info = (await call("/api/sharing", undefined, owner.auth)).data;
+  const team = info.teams[0];
+  await call(
+    "/api/sharing",
+    { action: "grantTeam", teamId: team.id, tableId: "*", role: "editor" },
+    owner.auth,
+  );
+  await share(owner, member, "*", "viewer", team.id);
+  let w = (
+    await call(
+      "/api/workspace?workspaceId=" + owner.state.id,
+      undefined,
+      member.auth,
+    )
+  ).data;
+  assert.equal(w.role, "editor");
+  const created = await call(
+    "/api/change",
+    {
+      action: "create",
+      workspaceId: owner.state.id,
+      name: "Shared new",
+      fields,
+      rows: [],
+      revision: w.revision,
+      requestId: randomUUID(),
+    },
+    member.auth,
+  );
+  assert.equal(created.status, 200);
+  assert.equal(created.data.tables.length, 2);
+  info = (await call("/api/sharing", undefined, owner.auth)).data;
+  await call(
+    "/api/sharing",
+    { action: "removeMember", teamId: team.id, userId: info.members[0].id },
+    owner.auth,
+  );
+  assert.equal(
+    (
+      await call(
+        "/api/workspace?workspaceId=" + owner.state.id,
+        undefined,
+        member.auth,
+      )
+    ).status,
+    404,
+  );
+});
+test("rich values, file validation, authorized download and reference isolation", async () => {
+  const owner = await account("files-owner"),
+    member = await account("files-member"),
+    other = await account("files-other");
+  let w = await create(owner),
+    t = w.tables[0];
+  const upload = await call(
+    "/api/attachments",
+    {
+      workspaceId: w.id,
+      tableId: t.id,
+      name: "notes.txt",
+      data: Buffer.from("Private attachment").toString("base64"),
+    },
+    owner.auth,
+  );
+  assert.equal(upload.status, 200);
+  assert.equal(
+    (await call("/api/attachments/" + upload.data.id, undefined, other.auth))
+      .status,
+    404,
+  );
+  assert.equal(
+    (
+      await call(
+        "/api/attachments",
+        {
+          workspaceId: w.id,
+          tableId: t.id,
+          name: "x.png",
+          data: Buffer.from("Not a PNG").toString("base64"),
+        },
+        owner.auth,
+      )
+    ).status,
+    400,
+  );
+  const richer = [
+    ...fields,
+    { id: "progress", name: "Progress", type: "progress" },
+    { id: "file", name: "Files", type: "files" },
+  ];
+  w = (
+    await call(
+      "/api/change",
+      {
+        action: "structure",
+        tableId: t.id,
+        fields: richer,
+        revision: w.revision,
+        requestId: randomUUID(),
+      },
+      owner.auth,
+    )
+  ).data;
+  const op = {
+    action: "patch",
+    tableId: t.id,
+    rowId: t.rows[0].id,
+    revision: w.revision,
+    requestId: randomUUID(),
+  };
+  assert.equal(
+    (
+      await call(
+        "/api/change",
+        { ...op, values: { progress: 101 } },
+        owner.auth,
+      )
+    ).status,
+    400,
+  );
+  w = (
+    await call(
+      "/api/change",
+      { ...op, values: { progress: 0, file: [upload.data.id] } },
+      owner.auth,
+    )
+  ).data;
+  assert.equal(w.tables[0].rows[0].values.progress, 0);
+  await share(owner, member, t.id);
+  assert.equal(
+    (await call("/api/attachments/" + upload.data.id, undefined, member.auth))
+      .status,
+    200,
+  );
+  assert.equal(
+    (
+      await call(
+        "/api/attachments",
+        {
+          workspaceId: w.id,
+          tableId: t.id,
+          name: "x.txt",
+          data: Buffer.from("x").toString("base64"),
+        },
+        member.auth,
+      )
+    ).status,
+    403,
+  );
+  const b = await create(other);
+  assert.equal(
+    (
+      await call(
+        "/api/change",
+        {
+          action: "structure",
+          tableId: b.tables[0].id,
+          fields: [
+            ...fields,
+            {
+              id: "bad",
+              name: "Bad file",
+              type: "files",
+              fixed: true,
+              fixedValue: [upload.data.id],
+            },
+          ],
+          confirmRemoval: true,
+          revision: b.revision,
+          requestId: randomUUID(),
+        },
+        other.auth,
+      )
+    ).status,
+    400,
+  );
+  const grants = (await call("/api/sharing", undefined, owner.auth)).data
+    .grants;
+  await call(
+    "/api/sharing",
+    { action: "revoke", id: grants[0].id },
+    owner.auth,
+  );
+  assert.equal(
+    (await call("/api/attachments/" + upload.data.id, undefined, member.auth))
+      .status,
+    404,
+  );
 });

@@ -1,4 +1,5 @@
 import { chromium } from "playwright";
+import { readFileSync } from "node:fs";
 process.env.TEST_MODE = "1";
 process.env.TEST_DB = "memory";
 const { createApp } = await import("../server/index.ts");
@@ -21,50 +22,218 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
-await page.goto("http://localhost:3000");
-await page.getByText("Explore a sample table").click();
-await page.getByLabel("Table name", { exact: true }).waitFor();
-await page.getByLabel("Table name", { exact: true }).fill("Supplier research");
-await page.getByLabel("Table name", { exact: true }).press("Enter");
-await page.getByText("All changes saved").waitFor();
-await page.getByLabel("Price (€)", { exact: true }).first().fill("2500");
-await page.getByLabel("Price (€)", { exact: true }).first().press("Enter");
-await page.waitForTimeout(300);
-await page.reload();
-await page.getByRole("button", { name: /Supplier research/ }).click();
-if (
-  (await page.getByLabel("Price (€)", { exact: true }).first().inputValue()) !==
-  "2500"
-)
-  throw Error("Cell did not persist");
-await page.screenshot({ path: "/tmp/atablez-table.png", fullPage: true });
-await page.getByRole("button", { name: "Modify table" }).click();
-await page.getByLabel("Column 1 name").fill("Supplier");
-await page.getByLabel("Column 1 description").fill("Registered supplier name");
-await page.getByRole("button", { name: "Save structure" }).click();
-await page.getByLabel("Supplier", { exact: true }).first().waitFor();
-await page.getByRole("button", { name: "Modify table" }).click();
-await page.screenshot({ path: "/tmp/atablez-structure.png", fullPage: true });
-await page.getByRole("button", { name: "Close structure" }).click();
-await page.getByRole("button", { name: "Sign up", exact: true }).click();
-await page
-  .getByLabel("Email", { exact: true })
-  .fill(`ui-${Date.now()}@example.test`);
-await page
-  .getByLabel("Password", { exact: true })
-  .fill("Long-test-password-123");
-await page
-  .getByRole("button", { name: "Create account & keep my tables" })
-  .click();
-await page.getByRole("button", { name: "My account" }).waitFor();
-if (await page.locator(".preview").count())
-  throw Error("Guest banner remains after signup");
-await page.setViewportSize({ width: 520, height: 900 });
-await page.screenshot({ path: "/tmp/atablez-mobile.png", fullPage: true });
-if (errors.length) throw Error(errors.join("\n"));
-console.log(
-  "UI checks passed: inline edits, persistence, schema change, signup claim, responsive screenshots; no browser errors",
-);
-await browser.close();
-await new Promise((r) => http.close(r));
-await instance.close();
+try {
+  await page.goto("http://localhost:3000");
+  await page.getByText("Explore a sample table").click();
+  await page
+    .getByLabel("Table name", { exact: true })
+    .fill("Ideas for the weekend");
+  await page.getByLabel("Table name", { exact: true }).press("Enter");
+  await page.getByText("Saved", { exact: true }).waitFor();
+  await page.locator('input[aria-label="Progress"]').first().fill("45");
+  await page.locator('input[aria-label="Progress"]').first().press("Enter");
+  await page.waitForTimeout(250);
+  await page.reload();
+  await page.getByRole("button", { name: /Ideas for the weekend/ }).click();
+  if (
+    (await page
+      .locator('input[aria-label="Progress"]')
+      .first()
+      .inputValue()) !== "45"
+  )
+    throw Error("Progress did not persist");
+  await page.screenshot({ path: "/tmp/atablez-table.png", fullPage: true });
+  await page.getByLabel("Table actions").click();
+  await page.getByRole("button", { name: "Modify table" }).click();
+  await page.getByLabel("Column 1 name").fill("Plan");
+  await page.getByRole("button", { name: "Save structure" }).click();
+  await page.getByLabel("Plan", { exact: true }).first().waitFor();
+  await page.getByRole("button", { name: "Keep my tables" }).click();
+  await page
+    .getByLabel("Email", { exact: true })
+    .fill("ui-" + Date.now() + "@example.test");
+  await page
+    .getByLabel("Password", { exact: true })
+    .fill("Long-test-password-123");
+  await page
+    .getByRole("button", { name: "Create account", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Share", exact: true }).waitFor();
+  if (await page.locator(".preview").count())
+    throw Error("Preview notice remains");
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Team & access" }).click();
+  await page.getByLabel("Team name", { exact: true }).fill("Family");
+  await page.getByRole("button", { name: "Create team", exact: true }).click();
+  await page.getByLabel("Rename team").waitFor();
+  await page.screenshot({ path: "/tmp/atablez-settings.png", fullPage: true });
+  await page.reload();
+  await page.getByRole("heading", { name: "Settings", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Tables", exact: true }).click();
+  await page.getByRole("button", { name: /Ideas for the weekend/ }).click();
+  await page.getByLabel("Table actions").click();
+  await page.getByRole("button", { name: "Modify table" }).click();
+  await page.getByRole("button", { name: "Add column", exact: true }).click();
+  await page.getByLabel("Column 6 name").fill("Photo");
+  await page.getByLabel("Column 6 type").selectOption("image");
+  await page.getByRole("button", { name: "Save structure" }).click();
+  await page
+    .getByLabel("Upload Photo")
+    .first()
+    .setInputFiles({
+      name: "pixel.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZWkAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    });
+  await page.locator(".thumbnail img").first().waitFor();
+  if (
+    !(await page
+      .locator(".thumbnail img")
+      .first()
+      .evaluate((x) => x.complete && x.naturalWidth > 0))
+  )
+    throw Error("Image preview failed");
+  await page.setViewportSize({ width: 520, height: 900 });
+  await page.screenshot({ path: "/tmp/atablez-mobile.png", fullPage: true });
+  if (
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth + 2,
+    )
+  )
+    throw Error("Page overflow");
+  // Exercise the same bundle in a sandboxed MCP host without native modals.
+  const browserAuth = await page.evaluate(() =>
+    sessionStorage.getItem("atablez.auth"),
+  );
+  const credential = await instance.s.identify(browserAuth);
+  const token = await instance.s.credential(
+    instance.s.query,
+    credential.workspace_id,
+    "access",
+    3600000,
+    "test-host",
+  );
+  const state = await instance.s.view(credential.workspace_id);
+  const tool = await fetch("http://localhost:3000/mcp", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      Authorization: "Bearer " + token,
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "open_workspace",
+        arguments: { tableId: state.tables[0].id },
+      },
+    }),
+  }).then((r) => r.json());
+  await page.route("**/test-host", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: '<!doctype html><body style="margin:0"><iframe id="widget" sandbox="allow-scripts allow-same-origin allow-downloads allow-forms" style="width:520px;height:900px;border:0"></iframe></body>',
+    }),
+  );
+  await page.goto("http://localhost:3000/test-host");
+  const html = readFileSync("dist/index.html", "utf8").replace(
+    "<head>",
+    `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src http://localhost:3000; img-src blob:; font-src 'none';">`,
+  );
+  await page.evaluate(
+    ({ html, result }) => {
+      const frame = document.getElementById("widget");
+      window.addEventListener("message", (event) => {
+        if (event.source !== frame.contentWindow) return;
+        const m = event.data;
+        if (m.method === "ui/initialize")
+          frame.contentWindow.postMessage(
+            {
+              jsonrpc: "2.0",
+              id: m.id,
+              result: {
+                protocolVersion: m.params.protocolVersion,
+                hostInfo: { name: "Test host", version: "1.0" },
+                hostCapabilities: { openLinks: {}, downloadFile: {} },
+                hostContext: {
+                  theme: "light",
+                  displayMode: "inline",
+                  containerDimensions: { width: 520 },
+                },
+              },
+            },
+            "*",
+          );
+        if (m.method === "ui/notifications/initialized")
+          frame.contentWindow.postMessage(
+            {
+              jsonrpc: "2.0",
+              method: "ui/notifications/tool-result",
+              params: result,
+            },
+            "*",
+          );
+        if (m.method === "ui/open-link") {
+          window.lastOpen = m.params.url;
+          frame.contentWindow.postMessage(
+            { jsonrpc: "2.0", id: m.id, result: {} },
+            "*",
+          );
+        }
+        if (m.method === "ui/download-file") {
+          window.lastDownload = m.params;
+          frame.contentWindow.postMessage(
+            { jsonrpc: "2.0", id: m.id, result: {} },
+            "*",
+          );
+        }
+      });
+      frame.srcdoc = html;
+    },
+    { html, result: tool.result },
+  );
+  const frame = page.frameLocator("#widget");
+  await frame.getByLabel("Table name", { exact: true }).waitFor();
+  await frame.locator(".thumbnail img").first().waitFor();
+  if (
+    !(await frame
+      .locator(".thumbnail img")
+      .first()
+      .evaluate((x) => x.complete && x.naturalWidth > 0))
+  )
+    throw Error("Sandbox image did not load");
+  await frame.getByLabel("Table actions").click();
+  await frame.getByRole("button", { name: "Export CSV", exact: true }).click();
+  await page.waitForFunction(() => !!window.lastDownload);
+  await frame.getByRole("button", { name: "Open entry" }).first().click();
+  await frame.getByRole("button", { name: "Delete row", exact: true }).click();
+  await frame.getByRole("alertdialog").waitFor();
+  await frame
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Cancel" })
+    .click();
+  await frame.getByRole("button", { name: "Close dialog" }).click();
+  await frame.getByRole("button", { name: "Settings", exact: true }).click();
+  await frame.getByRole("button", { name: "Open in app" }).click();
+  if (
+    (await page.evaluate(() => window.lastOpen)) !==
+    "http://localhost:3000/settings"
+  )
+    throw Error("Settings did not open app route");
+  console.log(
+    "Sandbox host passed: tool hydration, scoped API, blob image CSP, native-free confirmation, host CSV download and settings link.",
+  );
+  if (errors.length) throw Error(errors.join("\n"));
+  console.log(
+    "UI passed: inline edit, progress persistence, structure, signup claim, settings direct route, teams, image upload and narrow viewport.",
+  );
+} finally {
+  await browser.close();
+  await new Promise((r) => http.close(r));
+  await instance.close();
+}

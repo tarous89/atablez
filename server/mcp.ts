@@ -6,7 +6,7 @@ import type { Express } from "express";
 import type { OAuthServerProvider } from "@modelcontextprotocol/sdk/server/auth/provider.js";
 import { Fields, publicState, Problem } from "./domain.ts";
 import type { Store } from "./store.ts";
-const uri = "ui://atablez/workspace.html";
+const uri = "ui://atablez/workspace-v2.html";
 export async function attachMcp(
   app: Express,
   s: Store,
@@ -49,34 +49,40 @@ export async function attachMcp(
       openWorldHint: false,
     };
     async function result(id: string, selected?: string) {
-      const w = await s.workspace(id);
+      const home = wid || id;
+      const w = await s.view(home, id);
       const auth = await s.credential(
         s.query,
-        id,
+        home,
         "browser",
-        w.expires_at ? Math.max(1, Number(w.expires_at) - Date.now()) : 3600000,
+        w.expiresAt ? Math.max(1, Number(w.expiresAt) - Date.now()) : 3600000,
       );
       return {
         content: [
           {
             type: "text" as const,
-            text: "Saved workspace opened. Values are persisted. Guest previews expire after one hour; sign up in the panel to retain them.",
+            text: w.expiresAt
+              ? "Preview opened. Create an account to keep these tables after one hour."
+              : "Saved tables opened. Permissions apply to this account in both chat and the app.",
           },
         ],
         structuredContent: {
           workspaceId: id,
-          workspaceName: w.data.name ?? "My workspace",
+          workspaceName: w.name,
           revision: w.revision,
+          workspaces: await s.list(home),
           tableId: selected ?? null,
-          tables: w.data.tables.map((t: any) => ({
+          attachments: w.attachments,
+          tables: w.tables.map((t: any) => ({
             id: t.id,
             name: t.name,
             rowCount: t.rows.length,
+            permission: t.permission,
           })),
           ...(selected
             ? {
                 table: (() => {
-                  const t = w.data.tables.find((t: any) => t.id === selected);
+                  const t = w.tables.find((t: any) => t.id === selected);
                   return t
                     ? {
                         ...t,
@@ -88,7 +94,13 @@ export async function attachMcp(
               }
             : {}),
         },
-        _meta: { auth, apiBase: base, selected, state: publicState(w) },
+        _meta: {
+          auth,
+          apiBase: base,
+          selected,
+          state: w,
+          accountConnected: !!wid,
+        },
       };
     }
     function required() {
@@ -118,43 +130,51 @@ export async function attachMcp(
         };
       }
     };
-    server.registerResource(
-      "workspace",
-      uri,
-      { mimeType: "text/html;profile=mcp-app" },
-      async () => ({
-        contents: [
-          {
-            uri,
-            mimeType: "text/html;profile=mcp-app",
-            text: readFileSync("dist/index.html", "utf8"),
-            _meta: {
-              "openai/widgetCSP": {
-                connect_domains: [base],
-                resource_domains: [base],
+    for (const resourceUri of [uri, "ui://atablez/workspace.html"])
+      server.registerResource(
+        resourceUri === uri ? "workspace" : "workspace-legacy",
+        resourceUri,
+        { mimeType: "text/html;profile=mcp-app" },
+        async () => ({
+          contents: [
+            {
+              uri: resourceUri,
+              mimeType: "text/html;profile=mcp-app",
+              text: readFileSync("dist/index.html", "utf8"),
+              _meta: {
+                "openai/widgetCSP": {
+                  connect_domains: [base],
+                  resource_domains: [base, "blob:"],
+                  redirect_domains: [base],
+                },
+                ui: {
+                  csp: {
+                    connectDomains: [base],
+                    resourceDomains: [base, "blob:"],
+                  },
+                  prefersBorder: false,
+                },
+                "openai/ui": {
+                  availableDisplayModes: ["inline", "fullscreen"],
+                  preferredDisplayMode: "fullscreen",
+                },
+                "openai/widgetDescription":
+                  "Editable AtableZ tables with top navigation and reusable column instructions.",
               },
-              ui: {
-                csp: { connectDomains: [base], resourceDomains: [base] },
-                prefersBorder: false,
-              },
-              "openai/ui": {
-                availableDisplayModes: ["inline", "fullscreen"],
-                preferredDisplayMode: "fullscreen",
-              },
-              "openai/widgetDescription":
-                "Editable AtableZ tables with top navigation and reusable column instructions.",
             },
-          },
-        ],
-      }),
-    );
+          ],
+        }),
+      );
     server.registerTool(
       "open_workspace",
       {
         title: "My tables",
         description:
           "Open AtableZ to see saved tables or begin a one-hour guest preview.",
-        inputSchema: {},
+        inputSchema: {
+          workspaceId: z.string().optional(),
+          tableId: z.string().optional(),
+        },
         annotations: { ...annotations, readOnlyHint: true },
         _meta: {
           ...meta,
@@ -163,8 +183,8 @@ export async function attachMcp(
           },
         },
       },
-      safe(async () => {
-        if (wid) return result(wid);
+      safe(async (args: any) => {
+        if (wid) return result(args.workspaceId || wid, args.tableId);
         const g = await s.guest();
         return result(g.state.id);
       }),
@@ -176,6 +196,7 @@ export async function attachMcp(
         description:
           "Use when the user wants to save information in a reusable AtableZ table. Generate a concise table name, appropriate column types, descriptions, and reusable filling instructions. Save only supplied information; keep unknown values empty. Unconnected users receive an editable one-hour preview; they must sign up and connect to reuse it in later conversations.",
         inputSchema: {
+          workspaceId: z.string().optional(),
           name: z.string().min(1).max(120),
           description: z.string().max(2000).optional(),
           instructions: z.string().max(5000).optional(),
@@ -187,13 +208,18 @@ export async function attachMcp(
         _meta: meta,
       },
       safe(async (args: any) => {
-        const id: string = wid || (await s.guest()).state.id;
-        const w = await s.workspace(id);
-        const r = await s.mutate(id, {
-          ...args,
-          action: "create",
-          revision: w.revision,
-        });
+        const home: string = wid || (await s.guest()).state.id;
+        const id = wid ? args.workspaceId || home : home;
+        const w = await s.view(home, id);
+        const r = await s.mutate(
+          id,
+          {
+            ...args,
+            action: "create",
+            revision: w.revision,
+          },
+          home,
+        );
         return result(id, r.result.tableId);
       }),
     );
@@ -202,8 +228,9 @@ export async function attachMcp(
       {
         title: "Find saved tables",
         description:
-          "Find AtableZ tables and retrieve their field definitions before filling or editing records. Without tableId returns names and counts; with tableId returns schema and a bounded page of rows.",
+          "Find owned and shared AtableZ tables. Pass workspaceId from workspaces to target a shared database. Permissions are enforced on the server. Retrieve their field definitions before filling or editing records. Without tableId returns names and counts; with tableId returns schema and a bounded page of rows.",
         inputSchema: {
+          workspaceId: z.string().optional(),
           tableId: z.string().optional(),
           search: z.string().max(200).optional(),
           offset: z.number().int().min(0).default(0),
@@ -213,23 +240,26 @@ export async function attachMcp(
         _meta: authMeta,
       },
       safe(async (args: any) => {
-        const w = await s.workspace(required());
-        const tables = w.data.tables.filter(
+        const home = required();
+        const w = await s.view(home, args.workspaceId || home);
+        const tables = w.tables.filter(
           (t: any) =>
             !args.search ||
             t.name.toLowerCase().includes(args.search.toLowerCase()),
         );
         let output: any = {
           revision: w.revision,
+          workspaces: await s.list(home),
           tables: tables.map((t: any) => ({
             id: t.id,
             name: t.name,
             description: t.description,
             rowCount: t.rows.length,
+            permission: t.permission,
           })),
         };
         if (args.tableId) {
-          const t = w.data.tables.find((t: any) => t.id === args.tableId);
+          const t = w.tables.find((t: any) => t.id === args.tableId);
           if (!t) throw new Problem(404, "Table not found");
           output = {
             revision: w.revision,
@@ -237,6 +267,8 @@ export async function attachMcp(
               ...t,
               rows: t.rows.slice(args.offset, args.offset + args.limit),
             },
+            attachments: w.attachments.filter((a: any) => a.table_id === t.id),
+            permission: t.permission,
             total: t.rows.length,
             offset: args.offset,
           };
@@ -252,7 +284,7 @@ export async function attachMcp(
       {
         title: "Update saved table",
         description:
-          "Rename the workspace with action workspace and name (no tableId). Modify any column, including numbering, through structure; numbering is an ordinary user-defined column. Modify AtableZ records or structure using stable IDs from read_tables. Pass the current workspace revision and unique requestId. Patches preserve unspecified fields. Do not overwrite a conflicting revision; reread first. Required fields may be blank in drafts. Removing columns or replacing fixed values requires the user to review and confirm the impact.",
+          "Rename the workspace with action workspace and name (no tableId). Modify any column, including numbering, through structure; numbering is an ordinary user-defined column. Modify AtableZ records or structure using stable IDs from read_tables. Pass the current workspace revision and unique requestId. Patches preserve unspecified fields. Do not overwrite a conflicting revision; reread first. Pass workspaceId for shared tables. Viewer permissions never allow writes. Progress is a numeric value from 0 to 100; images/files store attachment IDs uploaded through the app. Required fields may be blank in drafts. Removing columns or replacing fixed values requires the user to review and confirm the impact.",
         inputSchema: {
           action: z.enum([
             "workspace",
@@ -264,9 +296,12 @@ export async function attachMcp(
             "deleteTable",
             "undo",
           ]),
+          workspaceId: z.string().optional(),
           tableId: z.string().optional(),
           rowId: z.string().optional(),
           name: z.string().optional(),
+          density: z.enum(["comfortable", "compact"]).optional(),
+          colorField: z.string().optional(),
           description: z.string().optional(),
           instructions: z.string().optional(),
           fields: Fields.optional(),
@@ -280,8 +315,9 @@ export async function attachMcp(
         _meta: authMeta,
       },
       safe(async (args: any) => {
-        const id = required();
-        await s.mutate(id, args);
+        const home = required();
+        const id = args.workspaceId || home;
+        await s.mutate(id, args, home);
         return result(id, args.tableId);
       }),
     );

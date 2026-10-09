@@ -7,6 +7,7 @@ import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
 import { store, hash, token } from "./store.ts";
 import { oauth } from "./oauth.ts";
 import { Problem, publicState } from "./domain.ts";
+import { sharing } from "./sharing.ts";
 import { attachMcp } from "./mcp.ts";
 const derive = promisify(scrypt);
 export async function createApp() {
@@ -29,8 +30,12 @@ export async function createApp() {
       "https://chatgpt.com",
       "https://web-sandbox.oaiusercontent.com",
     ];
-    const allowedOrigin = origin && (allowed.includes(origin) ||
-      /^https:\/\/[a-z0-9-]+\.web-sandbox\.oaiusercontent\.com$/.test(origin));
+    const allowedOrigin =
+      origin &&
+      (allowed.includes(origin) ||
+        /^https:\/\/[a-z0-9-]+\.web-sandbox\.oaiusercontent\.com$/.test(
+          origin,
+        ));
     if (allowedOrigin) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Vary", "Origin");
@@ -55,7 +60,7 @@ export async function createApp() {
     }
     next();
   });
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({ limit: "4mb" }));
   const attempts = new Map<string, { n: number; until: number }>();
   function limit(req: any, res: any, next: any) {
     const k = req.ip || "unknown";
@@ -89,18 +94,31 @@ export async function createApp() {
   app.post("/api/guest", async (_req, res) => res.json(await s.guest()));
   app.get("/api/workspace", async (req, res) => {
     const c = await who(req);
-    const w = await s.workspace(c.workspace_id);
-    res.json(publicState(w));
+    res.json(
+      await s.view(
+        c.workspace_id,
+        String(req.query.workspaceId || c.workspace_id),
+      ),
+    );
   });
   app.post("/api/change", async (req, res) => {
     const c = await who(req);
-    res.json(await s.mutate(c.workspace_id, req.body));
+    res.json(
+      await s.mutate(
+        req.body.workspaceId || c.workspace_id,
+        req.body,
+        c.workspace_id,
+      ),
+    );
   });
   app.post("/api/auth/signup", async (req, res) => {
     const input = z
       .object({
         email: z.email().max(254),
-        password: z.string().min(12).max(128),
+        password: z
+          .string()
+          .min(12, "Choose a password with at least 12 characters")
+          .max(128),
       })
       .parse(req.body);
     const email = input.email.toLowerCase();
@@ -175,6 +193,21 @@ export async function createApp() {
             "UPDATE workspaces SET data=$1,revision=revision+1 WHERE id=$2",
             [JSON.stringify(target.data), u.workspace_id],
           );
+          const usage = (
+            await q(
+              "SELECT COALESCE(SUM(size),0) AS n FROM attachments WHERE workspace_id IN($1,$2)",
+              [guest.id, u.workspace_id],
+            )
+          ).rows[0];
+          if (Number(usage.n) > 20 * 1024 * 1024)
+            throw new Problem(
+              400,
+              "Account file limit reached; preview was not transferred",
+            );
+          await q(
+            "UPDATE attachments SET workspace_id=$1 WHERE workspace_id=$2",
+            [u.workspace_id, guest.id],
+          );
           await q("DELETE FROM workspaces WHERE id=$1", [guest.id]);
         }
       }
@@ -233,6 +266,7 @@ export async function createApp() {
     });
     res.json({ redirect: result });
   });
+  sharing(app, s, who, base);
   await attachMcp(app, s, provider, base, limit);
   app.use(
     express.static("dist", {
@@ -241,7 +275,7 @@ export async function createApp() {
       },
     }),
   );
-  app.get("/", (_req, res) => {
+  app.get(["/", "/settings"], (_req, res) => {
     if (!existsSync("dist/index.html")) {
       res.status(503).send("Run npm run build first.");
       return;
@@ -257,18 +291,16 @@ export async function createApp() {
           : err.code === "23505"
             ? 409
             : 500;
-    res
-      .status(status)
-      .json({
-        error:
-          status === 500
-            ? "The request failed. Please try again."
-            : err.code === "23505"
-              ? "An account already exists. Please log in."
-              : err instanceof z.ZodError
-                ? err.issues.map((i) => i.message).join("; ")
-                : err.message,
-      });
+    res.status(status).json({
+      error:
+        status === 500
+          ? "The request failed. Please try again."
+          : err.code === "23505"
+            ? "An account already exists. Please log in."
+            : err instanceof z.ZodError
+              ? err.issues.map((i) => i.message).join("; ")
+              : err.message,
+    });
     if (status === 500) console.error(err.message);
   });
   const cleanup = setInterval(() => {

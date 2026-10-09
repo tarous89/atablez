@@ -50,5 +50,27 @@ export async function database() {
   await query(
     `CREATE TABLE IF NOT EXISTS oauth_data(id text PRIMARY KEY, kind text NOT NULL, expires_at bigint, data jsonb NOT NULL);`,
   );
+  await query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS users_home ON users(workspace_id)`,
+  );
+  await query(
+    `CREATE TABLE IF NOT EXISTS teams(id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, name text NOT NULL)`,
+  );
+  await query(
+    `CREATE TABLE IF NOT EXISTS team_members(team_id text REFERENCES teams(id) ON DELETE CASCADE, user_id text REFERENCES users(id) ON DELETE CASCADE, PRIMARY KEY(team_id,user_id))`,
+  );
+  await query(
+    `CREATE TABLE IF NOT EXISTS grants(id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, table_id text NOT NULL DEFAULT '*', subject_type text NOT NULL, subject_id text NOT NULL, role text NOT NULL CHECK(role IN ('editor','viewer')))`,
+  );
+  await query(
+    `CREATE TABLE IF NOT EXISTS invitations(id text PRIMARY KEY, token_hash text UNIQUE NOT NULL, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, table_id text NOT NULL DEFAULT '*', team_id text REFERENCES teams(id) ON DELETE CASCADE, role text NOT NULL, expires_at bigint NOT NULL, applicant text REFERENCES users(id) ON DELETE CASCADE, status text NOT NULL DEFAULT 'open')`,
+  );
+  await query(
+    `CREATE TABLE IF NOT EXISTS attachments(id text PRIMARY KEY, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE, table_id text NOT NULL, name text NOT NULL, mime text NOT NULL, size integer NOT NULL, bytes bytea NOT NULL, created_at bigint NOT NULL)`,
+  );
+  await query(
+    `CREATE TABLE IF NOT EXISTS storage_budget(id integer PRIMARY KEY)`,
+  );
+  await query(`INSERT INTO storage_budget VALUES(1) ON CONFLICT DO NOTHING`);
   return { query, transaction, close };
 }

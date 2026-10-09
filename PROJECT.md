@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-09
 Repository: https://github.com/tarous89/atablez
-Stage: private beta deployed on Render; browser custom app connected and user confirms basic data flow works. Next iteration scoped: shared visual redesign, settings, rich cells and team access.
+Stage: private beta deployed on Render; browser custom app connected and user confirms basic data flow works. Redesign, settings, rich cells and team access implemented and locally verified; release deployment pending.
 Owner: Tarek Roustom
 
 ## 1. Product and agreed direction
@@ -18,7 +18,7 @@ Confirmed requirements:
 - Source code and living project documentation stay in this GitHub repository.
 - Owner-controlled hosting on Render, using dedicated AtableZ app and PostgreSQL services. No Cloudflare/Supabase or Sites hosting.
 - ChatGPT is the primary entry point; the website provides the same editor and access to existing work.
-- Existing beta: one personal workspace per user; no projects. Next iteration adds shared workspace/table access and teams as defined in docs/REDESIGN_AND_SHARING.md.
+- One owned personal workspace per account plus access to shared workspaces/tables and teams. No projects. See docs/REDESIGN_AND_SHARING.md.
 - Top navigation only; preserve horizontal room for tables.
 - Direct click-to-edit table names, descriptions, and entry values; no edit-mode buttons.
 - Modify table opens a structure editor for column names, descriptions, data types, and filling instructions.
@@ -299,3 +299,19 @@ Authoritative next-iteration scope: [docs/REDESIGN_AND_SHARING.md](docs/REDESIGN
 User requests one consistent app/extension design and vocabulary, a minimal Things-inspired shell, Airtable-inspired rich cells, signup-copy cleanup, Settings, teams with Viewer/Editor access in each member’s own ChatGPT, links, images, files and progress bars. The scope defines navigation/copy, permissions, actual upload storage, actor-based auth migration, safe shared-table hydration, phased implementation and acceptance checks. Optional emoji remain user-controlled; no automatic column prefixes.
 
 Status: specification saved; these new features have not yet been implemented or deployed. Source inspection confirms current credentials and whole-workspace history/hydration require changes before safe table-only sharing. This documentation commit intentionally changes no runtime code.
+
+
+## 2026-10-09 — redesign and shared access implementation
+
+Implementation complete; production build and eleven integration tests pass. Browser tests pass for desktop/narrow layouts, rich editing, signup retention, Settings routing, teams and actual image uploads. Sandboxed MCP host tests pass for hydration, scoped reads, blob-image CSP, in-app confirmations, host CSV download and external /settings navigation.
+
+Delivered:
+- One shared React bundle and wording for website/ChatGPT, neutral/blue visual system, top navigation, editable workspace/table names, compact menus, resizable columns, row spacing and optional row colours.
+- Choice/multiple-choice colours, progress, rating, clickable links, image thumbnails and protected file uploads. No automatic column prefix icons.
+- Routable Settings for workspace, storage, team access and account/password change. Removed permanent password-rule helper; validation policy remains 12 characters.
+- Owner-managed named teams, workspace/table grants, Viewer/Editor roles, revocation and shared workspace discovery in MCP. Existing credentials retain actor identity through a unique home-workspace mapping; they never inherit an owner's token.
+- Copy-link invitations: recipient signs in and requests access, owner approves the specific account. No emails sent and no additional service purchased. Email verification and forgotten-password recovery are not configured.
+- Stored attachments inherit table access. Limits and storage cleanup are documented in the scope. Existing private-only tables remain private until explicitly shared.
+- Owner-only global undo, transactional write/grant coordination and scoped hydration prevent cross-table access leaks. Editors can change rows/schema; only owners manage grants or delete tables/workspaces.
+
+Deployment: queued for the existing Render service after source commit. No new compute/database or paid infrastructure. Existing free database expiry remains 2026-11-08; upgrade before relying on permanent storage past that date.
