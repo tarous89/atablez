@@ -365,3 +365,7 @@ User screenshot showed `OAuth failed: invalid_request - Wrong resource` on recon
 ## Password minimum — 2026-10-09
 
 User requested a 6-character minimum instead of 12. Signup and account password changes now enforce 6 characters, with matching validation messages. Both app and ChatGPT extension use these shared endpoints. This supersedes the previous 12-character policy; login still accepts existing passwords.
+
+## ChatGPT-first connection experience — 2026-10-09
+
+OAuth ?connect tickets now render a dedicated centered connection screen instead of the app dashboard and its banner. Signup/sign-in explicitly consents to table access and immediately completes the existing OAuth callback; signed-in users approve with Connect & return to ChatGPT. The normal app is optional. Embedded top navigation includes Open app, and existing full settings remain embedded. Embedded signup remains supported; permanent ChatGPT account linking still uses the host OAuth flow (do not promise iframe signup alone links ChatGPT). No auth/security changes. Official reference: https://developers.openai.com/plugins/build/auth .

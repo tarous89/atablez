@@ -6,7 +6,7 @@ Updated: 2026-10-09. Owner: Tarek Roustom. Repo: https://github.com/tarous89/ata
 
 AtableZ: **Your custom reusable database.** ChatGPT-first reusable structured tables, with one shared React UI for the website and embedded ChatGPT app. Top navigation, inline editing, rich field types, saved appearance, and owner-controlled Viewer/Editor sharing. Workspace rather than projects. General / Workspace / Team settings. General shows email/password/sign-out and actual file/table/row usage. No billing or upgrade buttons.
 
-Appearance is deterministic validated data (dimensions, colors, conditional rules) plus optional original user prompt; never arbitrary generated executable code. ChatGPT and manual changes use the same revision-checked service. Settings opened from a table targets that table, not workspace defaults. Enter/blur saves numeric settings with visible validation/status. Current resource: ui://atablez/workspace-v4.html (old aliases supported). Refresh the custom ChatGPT connection after resource/tool metadata changes.
+Appearance is deterministic validated data (dimensions, colors, conditional rules) plus optional original user prompt; never arbitrary generated executable code. ChatGPT and manual changes use the same revision-checked service. Settings opened from a table targets that table, not workspace defaults. Enter/blur saves numeric settings with visible validation/status. Current resource: ui://atablez/workspace-v5.html (old aliases supported). Refresh the custom ChatGPT connection after resource/tool metadata changes.
 
 ## Hosting and identity
 
@@ -93,3 +93,9 @@ User screenshot showed `OAuth failed: invalid_request - Wrong resource` on recon
 ## Password minimum — 2026-10-09
 
 User requested a 6-character minimum instead of 12. Signup and account password changes now enforce 6 characters, with matching validation messages. Both app and ChatGPT extension use these shared endpoints. This supersedes the previous 12-character policy; login still accepts existing passwords.
+
+## ChatGPT-first connection experience — 2026-10-09
+
+OAuth ?connect tickets now render a dedicated centered connection screen instead of the app dashboard and its banner. Signup/sign-in explicitly consents to table access and immediately completes the existing OAuth callback; signed-in users approve with Connect & return to ChatGPT. The normal app is optional. Embedded top navigation includes Open app, and existing full settings remain embedded. Embedded signup remains supported; permanent ChatGPT account linking still uses the host OAuth flow (do not promise iframe signup alone links ChatGPT). No auth/security changes. Official reference: https://developers.openai.com/plugins/build/auth .
+
+Connection UI validation: production build and OAuth migration regression passed. Browser visual test unavailable because Chromium download returned an invalid archive. Resource bumped to v5 with earlier aliases retained; verify installed ChatGPT UI after refresh.

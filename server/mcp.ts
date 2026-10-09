@@ -8,7 +8,7 @@ import { Fields, publicState, Problem } from "./domain.ts";
 import type { Store } from "./store.ts";
 import { Appearance, appearanceFor } from "../shared/appearance.ts";
 import { readSharing, changeSharing, accountUsage } from "./sharing.ts";
-const uri = "ui://atablez/workspace-v4.html";
+const uri = "ui://atablez/workspace-v5.html";
 export async function attachMcp(
   app: Express,
   s: Store,
@@ -139,6 +139,7 @@ export async function attachMcp(
     };
     for (const resourceUri of [
       uri,
+      "ui://atablez/workspace-v4.html",
       "ui://atablez/workspace-v3.html",
       "ui://atablez/workspace-v2.html",
       "ui://atablez/workspace.html",

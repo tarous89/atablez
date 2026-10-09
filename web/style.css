@@ -1515,3 +1515,8 @@ progress::-webkit-progress-value {
   border-radius: 6px;
   overflow: hidden;
 }
+
+.chat-connection-page { min-height:100dvh; display:grid; place-items:center; padding:24px; background:#f7f8fa; }
+.chat-connection-card { width:min(100%,420px); padding:32px; background:white; border:1px solid #e5e7eb; border-radius:20px; text-align:center; }
+.chat-connection-card h1 { font-size:24px; margin:20px 0 12px; }
+.chat-connection-card p { color:#667085; line-height:1.6; margin-bottom:24px; }

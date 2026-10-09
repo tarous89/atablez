@@ -412,6 +412,9 @@ function App() {
         (sort.asc ? 1 : -1)
       );
     });
+  if (ticket && !embedded) {
+    return <ChatConnection ticket={ticket} workspace={w} loadError={error || loadError} />;
+  }
   return (
     <DataContext.Provider value={{ w, t, readonly: !!readonly }}>
       <header>
@@ -475,6 +478,7 @@ function App() {
           </button>
         </nav>
         <div className="header-right">
+          {embedded && <button className="text-button" onClick={() => openExternal(apiBase + "/").catch(e => setError(e.message))}>Open app <ArrowUpRight size={14} /></button>}
           {!w?.signedIn && (
             <button
               className="text-button"
@@ -515,24 +519,6 @@ function App() {
             aria-label="Dismiss error"
           >
             <X size={16} />
-          </button>
-        </div>
-      )}
-      {ticket && (
-        <div className="connection">
-          <span>Use your saved and shared tables in ChatGPT.</span>
-          <button
-            className="primary"
-            onClick={async () => {
-              if (!w?.signedIn) setAccount(true);
-              else
-                run(async () => {
-                  const x = await api("connect", { ticket });
-                  location.assign(x.redirect);
-                });
-            }}
-          >
-            Connect account
           </button>
         </div>
       )}
@@ -2659,14 +2645,46 @@ function SharingPanel({
     </section>
   );
 }
+function ChatConnection({ ticket, workspace, loadError }: { ticket: string; workspace: Workspace | null; loadError: string }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [cancelled, setCancelled] = useState(false);
+  async function connect() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await api("connect", { ticket });
+      location.assign(result.redirect);
+    } catch (e: any) {
+      setError(e.message);
+      setBusy(false);
+      throw e;
+    }
+  }
+  return <main className="chat-connection-page">
+    <section className="chat-connection-card">
+      <Table2 size={30} />
+      <h1>{busy ? "Returning to ChatGPT…" : "Connect AtableZ to ChatGPT"}</h1>
+      <p>{cancelled ? "Connection cancelled. You can close this window and return to ChatGPT." : "Use your saved tables in ChatGPT. Allow ChatGPT to read and edit your tables with your account permissions."}</p>
+      {(error || loadError) && <p role="alert" className="field-error">{error || loadError}</p>}
+      {!cancelled && !workspace && !loadError && <p role="status">Preparing your connection…</p>}
+      {!cancelled && workspace?.signedIn && <button className="primary full" disabled={busy} onClick={() => connect().catch(() => {})}>{busy ? "Connecting…" : "Connect & return to ChatGPT"}</button>}
+      {cancelled && <button className="text-button" onClick={() => setCancelled(false)}>Try again</button>}
+    </section>
+    {!cancelled && workspace && !workspace.signedIn && <Account initialMode="login" connecting onClose={() => setCancelled(true)} onDone={connect} />}
+  </main>;
+}
+
 function Account({
   initialMode,
   onClose,
   onDone,
+  connecting = false,
 }: {
   initialMode: string;
+  connecting?: boolean;
   onClose: () => void;
-  onDone: () => void;
+  onDone: () => void | Promise<void>;
 }) {
   const [mode, setMode] = useState(initialMode),
     [email, setEmail] = useState(""),
@@ -2676,11 +2694,13 @@ function Account({
     [busy, setBusy] = useState(false);
   return (
     <Modal
-      title={mode === "signup" ? "Keep your tables" : "Welcome back"}
+      title={connecting ? "Connect AtableZ to ChatGPT" : mode === "signup" ? "Keep your tables" : "Welcome back"}
       onClose={onClose}
     >
       <p className="account-copy">
-        {mode === "signup"
+        {connecting
+          ? "Sign in or create an account to let ChatGPT read and edit your tables. You’ll return to ChatGPT immediately."
+          : mode === "signup"
           ? "Save your tables and use them in any conversation."
           : "Sign in to access your saved and shared tables."}
       </p>
@@ -2692,7 +2712,7 @@ function Account({
           try {
             const x = await api("auth/" + mode, { email, password });
             setAuth(x.auth);
-            onDone();
+            await onDone();
           } catch (e: any) {
             setError(e.message);
           } finally {
@@ -2740,8 +2760,8 @@ function Account({
           {busy
             ? "Please wait…"
             : mode === "signup"
-              ? "Create account"
-              : "Sign in"}
+              ? (connecting ? "Create account & connect" : "Create account")
+              : (connecting ? "Sign in & connect" : "Sign in")}
         </button>
       </form>
       <button
