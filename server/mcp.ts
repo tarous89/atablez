@@ -87,7 +87,7 @@ export async function attachMcp(
               }
             : {}),
         },
-        _meta: { auth, apiBase: base, selected },
+        _meta: { auth, apiBase: base, selected, state: publicState(w) },
       };
     }
     function required() {
@@ -128,6 +128,10 @@ export async function attachMcp(
             mimeType: "text/html;profile=mcp-app",
             text: readFileSync("dist/index.html", "utf8"),
             _meta: {
+              "openai/widgetCSP": {
+                connect_domains: [base],
+                resource_domains: [base],
+              },
               ui: {
                 csp: { connectDomains: [base], resourceDomains: [base] },
                 prefersBorder: false,

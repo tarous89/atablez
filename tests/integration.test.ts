@@ -271,3 +271,15 @@ test("MCP advertises app and creates guest table without exposing browser creden
     false,
   );
 });
+
+test("sandbox subdomain preflight allows bearer requests but rejects lookalike origins", async () => {
+  for (const origin of ["https://atablez-test.web-sandbox.oaiusercontent.com", "https://web-sandbox.oaiusercontent.com"]) {
+    const r = await fetch(base + "/api/workspace", {method:"OPTIONS", headers:{Origin:origin,"Access-Control-Request-Headers":"authorization,content-type"}});
+    assert.equal(r.headers.get("access-control-allow-origin"),origin);
+  }
+  for (const origin of ["https://evil.example", "https://atablez.web-sandbox.oaiusercontent.com.evil.example", "http://atablez.web-sandbox.oaiusercontent.com"]) {
+    const r = await fetch(base + "/api/guest", {method:"POST", headers:{Origin:origin,"Content-Type":"application/json"},body:"{}"});
+    assert.equal(r.status,403);
+    assert.equal(r.headers.get("access-control-allow-origin"),null);
+  }
+});

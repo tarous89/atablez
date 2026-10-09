@@ -281,3 +281,6 @@ Verified/reviewed during scope on 2026-10-09; recheck before implementation:
 - https://developers.openai.com/plugins/guides/optimize-metadata
 - https://supabase.com/pricing
 - https://developers.cloudflare.com/workers/platform/pricing/
+
+## 2026-10-09 embedded panel fix
+User's ChatGPT web panel showed Failed to fetch after successful create_table. Corrected API CORS to accept HTTPS per-app web-sandbox.oaiusercontent.com subdomains, preserving bearer authorization and rejecting lookalike origins. Added legacy widget CSP alongside MCP Apps CSP. Tool-only metadata now includes workspace state so the panel renders immediately before API refresh. Seven integration tests and production build pass. Live ChatGPT replay verification pending. Registered custom app observed in user context: asdk_app_6ac8b3f0b32c8191b910bdef2f0f87aa; original archive plugin is desktop-only and should not be presented as the browser installation path.

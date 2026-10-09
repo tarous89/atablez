@@ -99,6 +99,8 @@ function App() {
     if (result?._meta?.auth) {
       setAuth(result._meta.auth);
       apiBase = result._meta.apiBase || "";
+      if (result._meta.state) setW(result._meta.state);
+      setError("");
       api("workspace")
         .then(setW)
         .catch((e) => setError(e.message));

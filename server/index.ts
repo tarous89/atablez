@@ -29,7 +29,9 @@ export async function createApp() {
       "https://chatgpt.com",
       "https://web-sandbox.oaiusercontent.com",
     ];
-    if (origin && allowed.includes(origin)) {
+    const allowedOrigin = origin && (allowed.includes(origin) ||
+      /^https:\/\/[a-z0-9-]+\.web-sandbox\.oaiusercontent\.com$/.test(origin));
+    if (allowedOrigin) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Vary", "Origin");
       res.setHeader(
@@ -46,7 +48,7 @@ export async function createApp() {
       req.path.startsWith("/api") &&
       req.method === "POST" &&
       origin &&
-      !allowed.includes(origin)
+      !allowedOrigin
     ) {
       res.status(403).json({ error: "Origin not allowed" });
       return;
