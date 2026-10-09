@@ -1,0 +1,9 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "atablez": {
+      "type": "streamable-http",
+      "url": "https://atablez.onrender.com/mcp"
+    }
+  }
+}

@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-09
 Repository: https://github.com/tarous89/atablez
-Stage: first private-beta implementation built locally; deployment and live ChatGPT validation pending.
+Stage: private beta deployed on Render; hosted persistence and MCP discovery verified; private plugin created, installation and live ChatGPT validation pending.
 Owner: Tarek Roustom
 
 ## 1. Product and agreed direction
@@ -156,7 +156,7 @@ Hosting decisions:
 - Render chosen by user, replacing the earlier Cloudflare + Supabase proposal.
 - User explicitly approved a NEW dedicated free web service and NEW dedicated free PostgreSQL instance on 2026-10-09; do not reuse existing services/databases. Blueprint uses the approved free test plans. Free database expires after 30 days; free app sleeps. Do not promise durable public storage on this configuration.
 - Small paid app + database starts around $13/month at reviewed pricing, before overages; sizing remains a deployment decision.
-- Destination confirmed: Tarek Roustom's Workspace (tea-cspqipl6l47c739nslfg), Frankfurt. No AtableZ resources have been created yet. Blueprint is committed on main; applying it through Render Dashboard is pending because the connected tools cannot launch Blueprints or wire database connection references.
+- Destination confirmed and deployed: Tarek Roustom's Workspace (tea-cspqipl6l47c739nslfg), Frankfurt. Dedicated free AtableZ web/database created through Blueprint.
 
 ## 6. Proposed defaults, not yet user-approved product policy
 
@@ -251,7 +251,9 @@ Current verified state:
 - Production bundle and TypeScript check pass.
 - Six backend integration tests pass: typed writes/isolation/retries/conflicts; expiry; signup and login claim; structure undo; OAuth PKCE/code replay; MCP guest result privacy.
 - Browser QA passed at desktop and 520px panel widths: title/cell editing, reload persistence, column renaming, guest-to-account signup, and no browser runtime errors. Screenshots in docs/screenshots/.
-- Not deployed, not connected as an installed ChatGPT plugin, not publicly published.
+- Deployed at https://atablez.onrender.com on free Render web and PostgreSQL in Frankfurt. Hosted health, guest write/read, MCP initialize/tools/resources discovery, OAuth metadata, and browser inline rename/reload persistence verified on 2026-10-09.
+- Private workspace plugin created: Plugin_8ff744224a5c8191930fdaa7d3640947; release pluginrel_6ac8b1442618819199a1161221f0afd8. URL: https://chatgpt.com/plugins/Plugin_8ff744224a5c8191930fdaa7d3640947. Source in plugin/atablez. Installation, account consent, and real ChatGPT panel flow remain unverified; not publicly published.
+- Render web: srv-db4aism0tbcc73do32l0; database: dpg-db4aije0tbcc73do24rg-a. Database expires 2026-11-08T08:43:58Z; upgrade before expiry. Test writes used temporary guest workspaces only.
 
 Known implementation limits / release gates:
 - Unsigned ChatGPT creation opens an editable preview, but subsequent chat-driven edits require account linking. Safe guest chat continuity remains an integration task; never pass preview credentials to the model.
@@ -262,7 +264,7 @@ Known implementation limits / release gates:
 - Database startup creates initial tables; versioned production migrations must precede schema evolution.
 - Name availability for AtableZ remains unchecked.
 
-Next action: apply https://dashboard.render.com/blueprint/new?repo=https://github.com/tarous89/atablez in the confirmed workspace, then verify health, PostgreSQL persistence, and real ChatGPT guest/panel/OAuth flow before finalizing the installable plugin package.
+Next action: install the private plugin, verify ChatGPT side-panel behavior and account linking, then retrieve a saved table from a fresh conversation. User must complete their own signup and OAuth consent. Upgrade database before 2026-11-08.
 
 Later inputs needed:
 - Hosting account/project access and final domain before deployment.

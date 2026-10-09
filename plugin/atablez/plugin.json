@@ -1,0 +1,26 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "atablez",
+  "version": "0.1.0",
+  "description": "Save information from conversations into reusable tables. Edit entries and column instructions, then retrieve and update saved tables through your linked account.",
+  "author": {
+    "name": "Tarek Roustom"
+  },
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "AtableZ",
+        "shortDescription": "Save and reuse your tables",
+        "longDescription": "Turn conversation results into editable tables. Define column names, types and filling instructions once, then reuse them. Guest previews last one hour; create and link an account to retrieve tables in later conversations. Private beta.",
+        "developerName": "Tarek Roustom",
+        "category": "Productivity",
+        "capabilities": [
+          "Interactive"
+        ],
+        "defaultPrompt": "Save this information in a reusable table.",
+        "logo": "./assets/icon.svg",
+        "composerIcon": "./assets/icon.svg"
+      }
+    }
+  }
+}
